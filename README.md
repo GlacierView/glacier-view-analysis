@@ -45,11 +45,15 @@ git clone https://github.com/mattwaismann/glacier-view-analysis.git
 cd glacier-view-analysis
 ```
 
-3. Install the required Python packages:
+3. Install the dependencies with [uv](https://docs.astral.sh/uv/):
 
 ```bash
-pip install -r requirements.txt
+uv sync
 ```
+
+This creates a `.venv` from `pyproject.toml` and `uv.lock`, downloading the
+right Python (3.12) if you don't have it. Prefix commands with `uv run`, e.g.
+`uv run python final_areas.py`, or activate `.venv` directly.
 
 ## Usage
 

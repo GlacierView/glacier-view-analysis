@@ -16,6 +16,7 @@ src/segmentation/inference/model
 src/segmentation/training/training_data/
 src/segmentation/time_series/
 venv
+.venv/
 model.*
 model
 .idea/
@@ -34,3 +35,8 @@ src/segmentation/inference/helpers/__pycache__/
 # Trained model checkpoints — too large for GitHub (100MB limit).
 # Backed up to s3://segmentation-model-gv/checkpoints/ ; see src/segmentation/MODEL_MANIFEST.md
 src/segmentation/unet_summer_model_unfrozen_100
+
+# Committed reference data for the analysis notebooks. The blanket *.csv rule
+# above exists to keep the multi-hundred-MB metadata dumps out; these four are
+# small, and areas_true_vs_predicted_final.ipynb needs them.
+!data/analysis/*.csv

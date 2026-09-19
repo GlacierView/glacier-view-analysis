@@ -177,8 +177,9 @@ Checked by diffing local inventories against the buckets.
 outputs `final_areas.py` creates on startup.
 
 **Recovered (2026-09-19).** The four analysis inputs `areas_true_vs_predicted_final.ipynb`
-needs are now in the **repo root** — note the notebook lives in `src/segmentation/` and reads them
-relative to its cwd, so either run Jupyter from the repo root or move them:
+live in **`data/analysis/`**, committed (the blanket `*.csv` ignore has a negation for that
+directory). The notebook resolves them via an `ANALYSIS_DIR` constant derived from its own location,
+so it no longer depends on where Jupyter was launched:
 
 | File | Shape | What it is |
 |---|---|---|
@@ -240,11 +241,11 @@ used. `.DS_Store` files were uploaded alongside the tifs (some are 660 KB) — e
 ## Commands
 
 ```bash
-pip install -r requirements.txt          # top-level; the training/src one is a full frozen env dump
+uv sync                                  # builds .venv from pyproject.toml + uv.lock
 
-cd src/segmentation/training/src && python train.py --epochs 10 --lr 0.00001 --decay 0.00001 --batch 2
-cd src/segmentation/inference && python infer.py --glimsid G007026E45991N
-cd src/segmentation && python final_areas.py     # no args; iterates the whole landing zone
+cd src/segmentation/training/src && uv run python train.py --epochs 10 --lr 0.00001 --decay 0.00001 --batch 2
+uv run python src/segmentation/inference/infer.py --glimsid G007026E45991N
+cd src/segmentation && uv run python final_areas.py   # no args; whole landing zone
 ```
 
 `train.py` expects `training_data/{images,masks}` relative to the cwd, writes each run to

@@ -497,8 +497,8 @@ succeed while silently failing on most glaciers. **Always check the count of `Er
 **Where:** `src/segmentation/areas_true_vs_predicted_final.ipynb`
 
 Compares the model's areas against GLIMS `db_area`, grouped by region. **Its four input CSVs were
-missing and have now been recovered** (2026-09-19) — they sit in the repo root; see Part 8 for what
-each contains and the one caveat.
+missing and have now been recovered** — they live in `data/analysis/`; see Part 8 for what each
+contains and the one caveat.
 
 The statistical method, from the paper's appendix, is worth understanding because it's what turns
 noisy per-date areas into the headline number. Glaciers differ hugely in size, so averaging areas in
@@ -997,10 +997,9 @@ these on startup.
 ### ✅ Recovered — the four analysis CSVs (2026-09-19)
 
 These were missing when this document was first written (the LLD recorded them as *"somansh will push
-to github and email me"*). They have since been added and now sit in the **repo root**. Note
-`areas_true_vs_predicted_final.ipynb` lives in `src/segmentation/` and reads them relative to its own
-working directory — so either launch Jupyter from the repo root or move the files next to the
-notebook.
+to github and email me"*). They have since been added and live in **`data/analysis/`**, committed —
+the blanket `*.csv` ignore carries a negation for that directory. The notebook resolves them through
+an `ANALYSIS_DIR` constant derived from its own location, so it works wherever Jupyter starts.
 
 | File | Shape | What it actually is |
 |---|---|---|
@@ -1051,44 +1050,42 @@ deliberately dropped after the DEM pull, not lost.
 
 ## Part 9 — Getting set up
 
-### Step 0 — expect to build the environment from scratch
+### Step 0 — install the environment
 
-There is **no working Python environment in this repo**. Verified: the system `python3` is 3.9.6 with
-none of the dependencies installed, there's no `venv/` or `.venv/`, and no conda. A `.pyc` for
-Python 3.9 in `helpers/__pycache__/` suggests the original env was 3.9.
-
-### Step 1 — `requirements.txt` will not install as-is
-
-Three separate problems, all verified:
-
-1. **It's UTF-16 encoded** (`Unicode text, UTF-16, little-endian, with CRLF`). `pip` expects UTF-8;
-   this may fail outright or produce garbage package names. Convert first:
-   ```bash
-   iconv -f UTF-16 -t UTF-8 requirements.txt | tr -d '\r' > requirements-utf8.txt
-   ```
-2. **`torch~=2.1.0+cu118` and `torchvision~=0.16.0+cu118` are CUDA builds.** There are no `cu118`
-   wheels for macOS. On a Mac, install plain `torch`/`torchvision` instead (CPU or MPS).
-3. **13 packages the code imports are missing from it.** Verified by scanning every `import` across
-   all `.py` and `.ipynb` files:
-
-   `earthengine-api`, `geemap`, `pyproj`, `shapely`, `scikit-learn`, `scipy`, `tifffile`, `pillow`,
-   `boto3`, `seaborn`, `statsmodels`, `sympy`, `tensorflow`
-
-   (`tensorflow` is only imported by the two dead Keras files — you don't need it. The rest you do.)
-
-A working starting point:
+The project uses [uv](https://docs.astral.sh/uv/) for dependency management. One command:
 
 ```bash
-python3 -m venv venv && source venv/bin/activate
-pip install --upgrade pip
-pip install pandas matplotlib numpy tqdm scikit-image scikit-learn scipy \
-            rasterio geopandas pyproj shapely tifffile pillow opencv-python imageio \
-            torch torchvision torchmetrics \
-            earthengine-api geemap boto3 seaborn statsmodels
+uv sync
 ```
 
-Geospatial packages (`rasterio`, `geopandas`, `pyproj`) bundle native GDAL/PROJ libraries and are the
-most likely to fight you. If pip struggles, use conda-forge for those three specifically.
+That reads `pyproject.toml`, installs the exact versions pinned in `uv.lock` into `.venv/`, and
+downloads CPython 3.12 if you don't already have it (the version is pinned in `.python-version`).
+Then either prefix commands with `uv run`, or activate `.venv` the usual way.
+
+```bash
+uv run python src/segmentation/inference/infer.py --glimsid G007026E45991N
+uv run jupyter lab          # notebook deps are in the "notebook" group, installed by default
+```
+
+Verified working: all 24 third-party imports resolve on Python 3.12, and a released checkpoint loads
+and runs a forward pass. Dependencies were derived by scanning every `import` in `src/` rather than
+inherited from the old `requirements.txt`.
+
+**Why `requires-python` is capped at `<3.13`:** the geospatial stack (rasterio, geopandas) and torch
+lag behind new interpreter releases. Left uncapped, uv resolves against 3.14 and you get wheels that
+don't exist. If you widen it, re-run `uv lock` and actually `uv sync` to check.
+
+**If you need a specific CUDA build:** PyPI's torch gives a CPU/MPS build on macOS and a
+bundled-CUDA build on Linux, which covers both a laptop and a GPU box. The published model was
+trained against cu118 — `pyproject.toml` carries a commented `[[tool.uv.index]]` block for pinning
+that exactly.
+
+*Historical note, in case you find old instructions:* `requirements.txt` was removed in favour of
+`pyproject.toml`. It could not be installed as written — it was UTF-16 encoded with CRLF line
+endings, pinned `torch~=2.1.0+cu118` (no such wheel exists for macOS), and omitted 13 packages the
+code imports. The `src/segmentation/training/src/requirements.txt` beside it was a 200-line frozen
+`pip freeze` of someone's entire 2021 environment, including `pywin32`.
+
 
 ### Step 2 — credentials
 
@@ -1178,7 +1175,9 @@ eval split and keeps the last epoch rather than the best one. See the recipe tab
 
 ### What doesn't exist
 
-No test suite, no linter config, no CI, no `setup.py`/`pyproject.toml`, no Docker, no orchestration.
+No test suite, no linter config, no CI, no Docker, no orchestration. Dependencies *are* managed
+(`pyproject.toml` + `uv.lock`), but nothing enforces code quality — adding `ruff` to the
+`[dependency-groups]` would be a cheap first step.
 `git status` on a fresh clone will show notebook diffs immediately, because notebooks store their
 output cells — consider `nbstripout` if that bothers you.
 
