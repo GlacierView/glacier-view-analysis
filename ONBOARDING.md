@@ -608,7 +608,7 @@ trusting or reproducing the weighting.
 | `src/styles/ieee.mplstyle` | Shared matplotlib style for publication-ready plots. |
 | `rgi_examples/`, `GlobGlacier examples/` | Screenshots showing why those inventories were excluded. |
 | `QGIS projects/` | A QGIS project file — QGIS is the standard desktop GIS tool, useful for eyeballing a GeoTIFF against a basemap. |
-| `cnn_architecture.png` | Architecture diagram from the README. |
+| `figures/cnn_architecture.png` | The U-Net architecture diagram, shown in the README. |
 | `src/segmentation/gifs/` | Output GIFs from previous runs — ~150 of them. Watch a few; they make the whole project click. |
 
 ---

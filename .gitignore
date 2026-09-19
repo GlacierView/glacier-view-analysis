@@ -40,3 +40,12 @@ src/segmentation/unet_summer_model_unfrozen_100
 # above exists to keep the multi-hundred-MB metadata dumps out; these four are
 # small, and areas_true_vs_predicted_final.ipynb needs them.
 !data/analysis/*.csv
+
+# figures/ is curated project artwork — diagrams, the architecture figure, the
+# UTM illustrations, paper plots. The blanket *.png / *.jpg rules above target
+# generated model output, not these. Un-ignore by extension rather than with
+# !figures/** so that .DS_Store stays ignored.
+!figures/*.png
+!figures/*.jpg
+!figures/*.drawio
+!figures/*.pgw

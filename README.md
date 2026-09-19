@@ -13,7 +13,7 @@
 - [License](#license)
 
 ## Introduction
-![CNN Architecture](cnn_architecture.png)
+![CNN Architecture](figures/cnn_architecture.png)
 
 This repository contains a machine learning model for performing image segmentation on glacier images using the pre-trained ResNet-50 model with a U-Net architecture and PyTorch framework. Image segmentation is the process of classifying each pixel in an image into a specific class, which is essential for tasks like understanding glacier boundaries and ice extent.
 
