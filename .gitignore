@@ -17,8 +17,13 @@ src/segmentation/training/training_data/
 src/segmentation/time_series/
 venv
 .venv/
-model.*
-model
+# Torch checkpoints. train.py writes `model` into experiments/<n>/ and into
+# src/segmentation/inference/; the inference scripts torch.load("model") from
+# their working directory. Anchored to that tree on purpose — the unanchored
+# `model.*` these replace also matched things like .agents/context/model.md.
+src/segmentation/model
+src/segmentation/**/model
+src/segmentation/**/model.[!m]*
 .idea/
 src/segmentation/training/src/experiments/
 src/segmentation/training/src/test_clean.csv
