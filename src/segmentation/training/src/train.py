@@ -1,30 +1,24 @@
 # Importing all the necessary modules
-import matplotlib.pyplot as plt
-import pickle
-import numpy as np
+import argparse
 import os
+import random
+import sys
+from datetime import datetime
 from os import listdir
 from os.path import isfile, join
+from pathlib import Path
+
+import matplotlib.pyplot as plt
+import numpy as np
+import pandas as pd
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-import torchmetrics
+import torchvision.transforms.functional as TF
+from skimage import io
+from torch.utils.data import DataLoader, Dataset
 from torchmetrics import Dice, JaccardIndex
 from tqdm import tqdm
-from skimage import io
-import pandas as pd
-from torchvision.io import read_image
-from torch.utils.data import Dataset
-from torch.utils.data import DataLoader
-from torchvision import utils
-import torchvision.transforms.functional as TF
-import random
-import torchvision.models as models
-from torch.nn.functional import interpolate
-from datetime import datetime
-import argparse
-import sys
-from pathlib import Path
 
 # Import the model from its single definition rather than redeclaring it here.
 SEGMENTATION_DIR = Path(__file__).resolve().parents[2]
@@ -37,8 +31,10 @@ device = torch.device(device)
 
 # Processing arguments
 parser = argparse.ArgumentParser("training_args")
-parser.add_argument("--epochs", help="Number of training epochs. Default value 10", type=int, default=10)
-parser.add_argument("--lr", help="Learning Rate. Default value 0.00001", type=float, default=0.00001)
+parser.add_argument("--epochs", type=int, default=10,
+                    help="Number of training epochs.")
+parser.add_argument("--lr", type=float, default=0.00001,
+                    help="Learning rate. The published model used 0.00001.")
 parser.add_argument("--decay", help="Weight Decay for optimizer.", type=float, default=0.00001)
 parser.add_argument("--batch", help="Batch size", type=int, default=2)
 args = parser.parse_args()
@@ -90,7 +86,8 @@ if MAKE_CSV:
     mask_files = ['masks/' + i for i in valid_imgs]
 
     # Creating dataframe of image and mask paths
-    df = pd.DataFrame(list(zip(img_files, mask_files)), columns=[['img', 'mask']])
+    df = pd.DataFrame(list(zip(img_files, mask_files, strict=True)),
+                      columns=[['img', 'mask']])
     df = df.sample(frac=1).reset_index(drop=True)
 
     # Separating training and test set
@@ -223,7 +220,7 @@ def make_one_hot(input, num_classes):
 
 
 class BinaryDiceLoss(nn.Module):
-    """Dice loss of binary class
+    r"""Dice loss of binary class
     Args:
         smooth: A float number to smooth loss, and avoid NaN error, default: 1
         p: Denominator value: \sum{x^p} + \sum{y^p}, default: 2
@@ -238,7 +235,7 @@ class BinaryDiceLoss(nn.Module):
     """
 
     def __init__(self, smooth=1, p=2, reduction='mean'):
-        super(BinaryDiceLoss, self).__init__()
+        super().__init__()
         self.smooth = smooth
         self.p = p
         self.reduction = reduction
@@ -260,7 +257,7 @@ class BinaryDiceLoss(nn.Module):
         elif self.reduction == 'none':
             return loss
         else:
-            raise Exception('Unexpected reduction {}'.format(self.reduction))
+            raise Exception(f'Unexpected reduction {self.reduction}')
 
 
 class DiceLoss(nn.Module):
@@ -276,7 +273,7 @@ class DiceLoss(nn.Module):
     """
 
     def __init__(self, weight=None, ignore_index=None, **kwargs):
-        super(DiceLoss, self).__init__()
+        super().__init__()
         self.kwargs = kwargs
         self.weight = weight
         self.ignore_index = ignore_index
@@ -292,7 +289,7 @@ class DiceLoss(nn.Module):
                 dice_loss = dice(predict[:, i], target[:, i])
                 if self.weight is not None:
                     assert self.weight.shape[0] == target.shape[1], \
-                        'Expect weight shape [{}], get[{}]'.format(target.shape[1], self.weight.shape[0])
+                        f'Expect weight shape [{target.shape[1]}], get[{self.weight.shape[0]}]'
                     dice_loss *= self.weights[i]
                 total_loss += dice_loss
 
@@ -311,7 +308,7 @@ def train(torch_model, epochs=10, loss_fn='ce'):
             for param in torch_model.resnet.parameters():
                 param.requires_grad = True
 
-        for i, (imgs, segs) in enumerate(tqdm(train_dataloader)):
+        for imgs, segs in tqdm(train_dataloader):
             imgs = imgs.to(device)
             if loss_fn == 'ce':
                 segs = segs.squeeze(1).to(device).long()
@@ -375,7 +372,7 @@ torch_model = torch_model.to(device=device)
 # Timing and training the model
 start_time = datetime.now()
 train(torch_model, epochs=EPOCHS, loss_fn=LOSS)
-print('Time elapsed (hh:mm:ss.ms) {}'.format(datetime.now() - start_time))
+print(f'Time elapsed (hh:mm:ss.ms) {datetime.now() - start_time}')
 # Uncomment to load a particular model, givrn its path
 # torch_model = torch.load("experiments/10014/model")
 # torch_model.to(device)
@@ -416,11 +413,10 @@ if not os.path.exists(exp_folder):
     os.mkdir(exp_folder)
 
 if not os.path.exists(exp_folder + "thecounter.data"):
-    counter = open(exp_folder + "thecounter.data", "w")
-    counter.write('10000')
-    counter.close()
+    with open(exp_folder + "thecounter.data", "w") as counter:
+        counter.write('10000')
 
-with open(exp_folder + "thecounter.data", "r") as counter:
+with open(exp_folder + "thecounter.data") as counter:
     count = int(counter.read())
     counter.close()
 
@@ -433,8 +429,8 @@ new_folder = exp_folder + f"{count}/"
 
 filename = new_folder + 'hyperparameters.txt'
 
-file = open(filename, 'a+')
-file.write(f"""Hyperparameters
+with open(filename, 'a+') as file:
+    file.write(f"""Hyperparameters
 
 LEARNING_RATE = {LEARNING_RATE}
 WEIGHT_DECAY = {WEIGHT_DECAY}
@@ -446,7 +442,6 @@ MAKE_CSV = {MAKE_CSV}
 TEST_SIZE = {TEST_SIZE}
 TRANSFORMS = {TRANSFORMS}
 LOSS = {LOSS}""")
-file.close()
 
 plt.figure(0)
 plt.plot(train_losses)
@@ -482,11 +477,10 @@ for IMG in range(BATCH_SIZE):
     plt.imshow(outputs[IMG].detach().cpu().numpy()[1] >= PROB_THRESHOLD)
     #     print(f'{str(IMG+10000)}.png')
     plt.title("Predicted mask")
-    plt.savefig(new_folder + f'results/{str(IMG + 1000)}.png')
+    plt.savefig(new_folder + f'results/{IMG + 1000!s}.png')
     # plt.show()
 
-counter = open(exp_folder + "thecounter.data", "w")
-counter.write(str(count))
-counter.close()
+with open(exp_folder + "thecounter.data", "w") as counter:
+    counter.write(str(count))
 
 

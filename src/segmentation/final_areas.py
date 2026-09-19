@@ -87,7 +87,7 @@ def areas_km2(probabilities, original_sizes):
     crops, but a pixel only represents 900 m^2 in the original raster.
     """
     areas = []
-    for prediction, size in zip(probabilities, original_sizes):
+    for prediction, size in zip(probabilities, original_sizes, strict=True):
         resized = torchvision.transforms.Resize(size, antialias=True)(prediction)
         areas.append(float(resized.sum()) * KM2_PER_PIXEL)
     return areas
@@ -175,7 +175,8 @@ def main():
     model = torch.load(MODEL_PATH, map_location=device)
     model.to(device).eval()
 
-    landing_zone = SEGMENTATION_DIR.parent / "earth_engine" / "data" / "ee_landing_zone" / DATA_LABEL
+    landing_zone = (SEGMENTATION_DIR.parent / "earth_engine" / "data"
+                    / "ee_landing_zone" / DATA_LABEL)
     landsat_dir = str(landing_zone / "landsat")
     dem_dir = str(landing_zone / "dems")
 

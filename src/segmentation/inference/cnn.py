@@ -138,7 +138,7 @@ class UNet(nn.Module):
         ]
 
         y = feats[-1]
-        for (deconv, bn, conv), skip in zip(stages, skips):
+        for (deconv, bn, conv), skip in zip(stages, skips, strict=True):
             y = bn(self.relu(deconv(y)))
             y = conv(torch.cat([y, skip], dim=1))
 

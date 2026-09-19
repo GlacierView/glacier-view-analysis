@@ -50,6 +50,9 @@ dependencies = [
 ]
 
 [dependency-groups]
+dev = [
+    "ruff>=0.16.8",
+]
 # Needed to run the notebooks; not needed to run train.py / final_areas.py.
 notebook = [
     "jupyterlab>=4.0",
@@ -76,3 +79,60 @@ default-groups = ["notebook"]
 # [tool.uv.sources]
 # torch = [{ index = "pytorch-cu118", marker = "sys_platform == 'linux'" }]
 # torchvision = [{ index = "pytorch-cu118", marker = "sys_platform == 'linux'" }]
+
+[tool.ruff]
+# Pinned explicitly rather than relying on ruff's defaults, which widen between
+# releases — otherwise the rule set silently changes under you on upgrade.
+line-length = 100
+target-version = "py310"
+# Jupyter autosave copies; not source.
+extend-exclude = [".ipynb_checkpoints"]
+
+[tool.ruff.lint]
+select = [
+    "E",    # pycodestyle errors
+    "W",    # pycodestyle warnings
+    "F",    # pyflakes: undefined names, unused imports
+    "I",    # import sorting
+    "UP",   # pyupgrade: modernise for the target version
+    "B",    # bugbear: likely bugs
+    "C4",   # comprehension simplifications
+    "SIM",  # simplifications
+    "PIE",  # misc lint
+    "RUF",  # ruff's own rules
+]
+# Deliberately not selected, with reasons:
+#   DTZ  - demands timezone-aware datetimes. Landsat acquisition dates are
+#          calendar dates; naive is correct here and tz-aware would be wrong.
+#   S    - bandit security rules, aimed at services rather than research code.
+#   PL   - pylint's opinionated complexity and style rules.
+#   TRY, BLE, LOG, ANN, D - style families this codebase has never followed;
+#          enabling them would bury the real findings.
+
+[tool.ruff.lint.per-file-ignores]
+# Notebooks are exploratory and have their own idioms. These rules fire on
+# things that are normal in a notebook rather than on defects:
+#   F821 - names defined in a cell that was later edited or deleted
+#   F811 - redefining a name while iterating in a later cell
+#   B018 - a bare expression on the last line is how you display a value
+#   E402 - imports after code, as cells get reordered
+#   F401 - imports kept around for interactive use
+#   E501 - long lines in scratch cells
+#   SIM115 - open() without a context manager while poking at a file
+#
+# The rest below are real findings that were left alone on purpose, because
+# "fixing" them in a notebook is riskier than leaving them:
+#   B007, F841 - a loop variable or assignment that looks unused in its own
+#          cell may well be read by a later cell, since notebook cells share
+#          one namespace. Renaming or deleting it can break the notebook.
+#   SIM105 - wants contextlib.suppress, which means injecting an import into
+#          a cell. `except Exception: pass` reads fine as-is.
+#   B905  - zip(strict=True) turns a silent truncation into an exception.
+#          That is the right default in new code (and is used in src/*.py),
+#          but changing it here alters behaviour on data not inspected.
+#   SIM113 - swapping a hand-rolled counter for enumerate() is a restructure,
+#          and the counter's value after the loop may be used downstream.
+"*.ipynb" = [
+    "F821", "F811", "B018", "E402", "F401", "E501", "SIM115",
+    "B007", "F841", "SIM105", "B905", "SIM113",
+]

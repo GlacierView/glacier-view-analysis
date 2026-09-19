@@ -28,7 +28,8 @@ SEGMENTATION_DIR = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SEGMENTATION_DIR))
 
 from helpers.preprocess import (  # noqa: E402
-    add_spectral_indices, prepare_glacier_stack,
+    add_spectral_indices,
+    prepare_glacier_stack,
 )
 from inference.cnn import IN_CHANNELS, UNet, conv_block  # noqa: E402,F401
 
@@ -78,7 +79,7 @@ def predict(model, inputs, device):
 def measure_areas(predictions, original_sizes):
     """Convert predicted masks to km^2 at each image's native resolution."""
     areas = []
-    for prediction, size in zip(predictions, original_sizes):
+    for prediction, size in zip(predictions, original_sizes, strict=True):
         mask = torch.from_numpy(prediction)
         resized = torchvision.transforms.Resize(size, antialias=True)(mask)
         binary = (resized > PROB_THRESH).sum().item()
@@ -110,7 +111,8 @@ def main():
     args = parse_args()
     device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-    landing_zone = SEGMENTATION_DIR.parent / "earth_engine" / "data" / "ee_landing_zone" / args.data_label
+    landing_zone = (SEGMENTATION_DIR.parent / "earth_engine" / "data"
+                    / "ee_landing_zone" / args.data_label)
     glacier_dir = landing_zone / "landsat" / args.glimsid
     dem_path = landing_zone / "dems" / f"{args.glimsid}_NASADEM.tif"
 

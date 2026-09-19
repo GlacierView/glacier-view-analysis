@@ -253,7 +253,9 @@ cd src/segmentation && uv run python final_areas.py   # no args; whole landing z
 `src/segmentation/inference/model` with the newly trained model. **The `--batch 2` default is not
 what the paper used — it reports batch size 32.** See the recipe table under "Model contract".
 
-There is no test suite, linter, or CI in this repo.
+Linting: `uv run ruff check .` — passes repo-wide, config in `pyproject.toml` with an explicitly
+pinned rule set. Notebooks have documented per-file exemptions. `ruff format` is deliberately not
+enforced. There is still no test suite and no CI.
 
 ## Model contract
 

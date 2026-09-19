@@ -1175,9 +1175,12 @@ eval split and keeps the last epoch rather than the best one. See the recipe tab
 
 ### What doesn't exist
 
-No test suite, no linter config, no CI, no Docker, no orchestration. Dependencies *are* managed
-(`pyproject.toml` + `uv.lock`), but nothing enforces code quality — adding `ruff` to the
-`[dependency-groups]` would be a cheap first step.
+No test suite, no CI, no Docker, no orchestration. Dependencies are managed (`pyproject.toml` +
+`uv.lock`) and linting is set up — `uv run ruff check .` passes repo-wide. The rule set is pinned
+explicitly in `[tool.ruff.lint]` rather than inherited from ruff's defaults, which widen between
+releases. Notebooks carry documented per-file exemptions for rules that fire on normal notebook
+idioms. `ruff format` is *not* enforced: it would reformat 31 files, mostly exploratory notebooks,
+for no maintainability gain.
 `git status` on a fresh clone will show notebook diffs immediately, because notebooks store their
 output cells — consider `nbstripout` if that bothers you.
 
