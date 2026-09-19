@@ -55,7 +55,19 @@ were edited away — that is what they are for.
 
 | Notebook | What it does |
 |---|---|
-| `areas_true_vs_predicted.ipynb` | Compares predicted areas against GLIMS `db_area` by region, via log-linear regression and a bootstrap. Reads the committed CSVs in `data/analysis/`. |
+| `regional_decline.ipynb` | The published analysis. Compares predicted areas against GLIMS `db_area` by region via log-linear regression plus two bootstraps, and produces the per-region regression figures. Reads `data/analysis/`. |
+
+This supersedes `areas_true_vs_predicted.ipynb`, which read the older
+245-glacier CSV and is a functional subset of it (see git history).
+
+**Two things to know before trusting its output.** It filters to glaciers whose
+predicted area is within 8% of the GLIMS training area
+(`rel_error_train < rel_error`, default 8) — a quality gate the paper does not
+mention. And its bootstrap weights each glacier by
+`(total_rows - n_observations) / total_rows`, which is the proportion of data
+*missing*, so glaciers with **more** data get **less** weight. That is the
+opposite of the stated intent and it materially changes the regional ordering;
+see `.agents/context/state.md`.
 
 ## Not here any more
 

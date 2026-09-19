@@ -45,6 +45,7 @@ src/segmentation/unet_summer_model_unfrozen_100
 # above exists to keep the multi-hundred-MB metadata dumps out; these four are
 # small, and areas_true_vs_predicted_final.ipynb needs them.
 !data/analysis/*.csv
+!data/analysis/*.xlsx
 !data/glims_18k.parquet
 
 # A 32-pair training fixture, committed so `glacierview train` can be smoke
@@ -60,3 +61,4 @@ src/segmentation/unet_summer_model_unfrozen_100
 !figures/*.drawio
 !figures/*.pgw
 !figures/inventory-examples/*.png
+!figures/regional-decline/*.png

@@ -42,8 +42,36 @@ so it no longer depends on where Jupyter was launched:
 | `training_areas.csv` | 3 × 260 | transposed lookup: ~259 glacier IDs → areas |
 | `areas_binary_05_filtered_smooth_25.csv` | 541 monthly dates × **245** glaciers | smoothed `glacierview areas` output, wide format (`pd.date_range('1979-01-01','2024-01-01',freq='MS')` = 541 months) |
 
-⚠️ **The areas CSV covers 245 glaciers; the paper claims 1,083.** So this is the 50-per-region
-vintage, not the run behind the paper's headline numbers — that output is still unaccounted for.
+**The 1,083-glacier output has been recovered** (2026-09-19):
+`data/analysis/areas_binary_05_filtered_smooth_f.xlsx` — 1,085 glacier columns, 541 dated rows
+(1979-01 to 2024-01), 39,241 observations, median 38 per glacier. Grouping to annual means and
+regressing per region yields exactly the paper's **1,083** glaciers, confirming this is the
+artifact behind the published rates. The 245-glacier CSV beside it is the older 50-per-region
+vintage, kept for comparison.
+
+⚠️ **Two methodological findings from the recovered analysis notebook**
+(`notebooks/analysis/regional_decline.ipynb`):
+
+1. **The bootstrap weighting is inverted.** The code computes
+   `weight = (total_rows - n_observations) / total_rows` — the proportion of data *missing* — so a
+   glacier with more observations gets less weight. The paper's text claims the opposite. Measured
+   on the real data (total relative change over each glacier's observed span):
+
+   | Region | n | As published | Corrected |
+   |---|---|---|---|
+   | Europe | 197 | −0.10537 | −0.09898 |
+   | Caucausus | 74 | −0.06541 | −0.06468 |
+   | Asia | 270 | −0.05515 | −0.05692 |
+   | North America | 293 | **−0.03979** | **−0.06004** |
+   | South America | 249 | −0.08361 | −0.09938 |
+   | **All** | **1083** | **−0.06706** | **−0.07557** |
+
+   North America is the one that matters: as published it is the slowest decline by a wide margin;
+   corrected it is in line with Asia. The fix changes the regional *ordering*, not just magnitudes.
+
+2. **There is an undocumented quality filter.** `rel_decline` keeps only glaciers whose predicted
+   area is within 8% of the GLIMS training area (`rel_error_train < 8`). The paper does not mention
+   it, and it gates every regional result.
 Note `geog_area_rollup` here includes **Oceania**, which the SQL treats as southern-hemisphere but
 which never appears among the paper's five regions; those 35 glaciers drop out somewhere.
 

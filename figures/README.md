@@ -46,6 +46,15 @@ evidence behind excluding them from the training set:
 - `globglacier-1..6.png` — GlobGlacier (ESA). A smaller, more carefully
   curated set.
 
+## `regional-decline/`
+
+The published per-region regression figures, from
+`notebooks/analysis/regional_decline.ipynb`: estimated area for individual
+glaciers, the pointwise average, and the fitted log-linear trend.
+
+`asia-reg.png`, `caucausus-reg.png`, `europe-reg.png`,
+`north-america-reg.png`, `south-america-reg.png`.
+
 ## Logos
 
 `earth-engine-logo.png`, `glims_logo_smooth.png` — for slides and diagrams.
