@@ -14,7 +14,7 @@ uv run python train.py --epochs 10 --lr 0.00001 --decay 0.00001 --batch 32
 
 `glacierview train` expects `training_data/{images,masks}` relative to its working directory. It writes each
 run to `experiments/<counter>/` (hyperparameters, loss plot, dice histogram, `model`) and also
-overwrites `src/segmentation/inference/model`.
+overwrites the checkpoint path you pass to `--checkpoint`.
 
 ## Match the published recipe
 

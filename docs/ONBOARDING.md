@@ -19,8 +19,8 @@ concrete details have drifted from the code, and those are flagged throughout.
 4. [Code tour: what every file is](#part-4--code-tour-what-every-file-is)
 5. [The AWS account](#part-5--the-aws-account)
 6. [The data model](#part-6--the-data-model)
-7. [The model contract (and the channel bug)](#part-7--the-model-contract-and-the-channel-bug)
-8. [What's missing, broken, or unbacked](#part-8--whats-missing-broken-or-unbacked)
+7. [The model contract](#part-7--the-model-contract)
+8. [Data state, and what is still open](#part-8--data-state-and-what-is-still-open)
 9. [Getting set up](#part-9--getting-set-up)
 10. [Landmines, ranked](#part-10--landmines-ranked)
 11. [Glossary](#part-11--glossary)
@@ -173,7 +173,7 @@ The bands this project cares about:
 
 **Critically: the band order differs per satellite.** On Landsat 5 and 7, band index 0 is blue. On
 Landsat 8, index 0 is `coastal_aerosol` and blue is index 1 — everything shifts by one.
-`src/segmentation/helpers/landsat_bands.py` is the lookup table that fixes this, and
+`glacierview.bands` is the lookup table that fixes this, and
 `preprocess.get_common_bands()` uses it to produce a consistent band order regardless of satellite.
 This is why **filenames are load-bearing** — see Part 6.
 
@@ -293,7 +293,7 @@ You run stages by hand, in order. Stages 1–5 have been run already; their outp
 
 ### Stage 1 — Select glaciers
 
-**Where:** `src/glims/src/glims_processor.ipynb`, then `glims_to_parquet.ipynb`
+**Where:** `notebooks/pipeline/01_glims_select_glaciers.ipynb`, then `glims_to_parquet.ipynb`
 
 Reads the full GLIMS shapefile (`src/glims/data/glims_db_20210914/glims_polygons.shp`) and filters
 it down to a workable set. The actual filters, read off the notebook:
@@ -316,7 +316,7 @@ the parquet exists purely so Athena can query glacier attributes).
 
 ### Stage 2 — Download imagery from Google Earth Engine
 
-**Where:** `src/earth_engine/src/gee_readers/ee_helpers.py` + the `ee_pull_*.ipynb` notebooks
+**Where:** `glacierview.earthengine.export` + `notebooks/pipeline/03..05_ee_pull_*.ipynb`
 
 **Google Earth Engine (GEE)** is Google's hosted planetary imagery archive. You don't download the
 archive; you send it a query and it returns just your clipped region. Requires a Google account with
@@ -346,7 +346,7 @@ Three things come out of each image, all at once:
 
 ### Stage 3 — Turn metadata into queryable tables
 
-**Where:** `src/earth_engine/src/metadata/time_series_metadata_handler.ipynb`
+**Where:** `notebooks/pipeline/07_metadata_time_series.ipynb`
 (and `training_metadata_processor.ipynb` for the training vintage)
 
 Now you have half a million tifs and a pile of JSON. This stage makes it queryable. It produces
@@ -373,7 +373,7 @@ The CSVs go to S3, an **AWS Glue crawler** infers their schema, and they become 
 
 ### Stage 4 — SQL filtering
 
-**Where:** `src/sql/`
+**Where:** `sql/`
 
 Two different questions, answered by near-identical queries:
 
@@ -421,7 +421,7 @@ Four things to know about this SQL, all verified by reading it:
 
 ### Stage 5 — Build the training set
 
-**Where:** `src/segmentation/mask_creator.ipynb`, then `get_training_set.ipynb`
+**Where:** `notebooks/pipeline/09_build_masks.ipynb`, then `get_training_set.ipynb`
 
 `mask_creator.ipynb` turns each glacier's lat/long GLIMS polygon into a pixel mask aligned to that
 glacier's imagery: build a glacier→CRS map from `image_attributes.csv`, reproject the polygon into
@@ -449,14 +449,15 @@ most important thing to understand about this repo — full detail in Part 7.
 
 ### Stage 6 — Train
 
-**Where:** `src/segmentation/training/src/train.py`
+**Where:** `glacierview.training` (`dataset.py`, `losses.py`, `trainer.py`), driven by
+`glacierview train`
 
 A single 593-line script, no functions to speak of, runs top to bottom: build a CSV of
 image/mask paths (dropping near-blank masks via `img.var() > 0.001`), 90/10 train/test split, a
 `GlacierDataset` that normalizes per-image and computes NDSI/NDWI on the fly, random flips and
 blurs for augmentation, then the U-Net, Adam, cross-entropy, and an evaluation printing mean Dice
 and Jaccard. Saves to `experiments/<counter>/model` **and** overwrites
-`src/segmentation/inference/model`.
+the configured output directory.
 
 Hyperparameters are a mix of CLI flags (`--epochs --lr --decay --batch`) and module-level constants
 you have to edit in the file (`LOSS`, `TRANSFORMS`, `NORMALIZE`, `UNFREEZE_WEIGHTS`, …). Note
@@ -471,7 +472,7 @@ in Part 7.
 
 Two entry points that do overlapping things differently:
 
-**`src/segmentation/inference/infer.py`** — one glacier, via `--glimsid`. Reads that glacier's
+**`glacierview infer`** — one glacier, via `--glims-id`. Reads that glacier's
 images, preprocesses, predicts, writes a GIF (every 5th frame) and a surface-area plot. Note it
 plots `np.sqrt(np.sum(prediction))` and titles it "Estimated Surface Area (no units)" — that square
 root is *not* an area, and this path is best read as a visual sanity check, not a measurement.
@@ -482,19 +483,19 @@ is `gaussian(X, sigma=[20,0,0,0], mode='reflect')` — σ = 20 *time points*, i.
 smoothed against itself at neighbouring dates to suppress per-scene noise. It is not spatial blur.
 
 ⚠️ The two scripts disagree about where smoothing sits, and the paper sides with `infer.py`:
-`infer.py` smooths first and derives the indices from the smoothed stack; `final_areas.py` computes
-the indices first and then smooths everything including them.
+both now smooth first and derive the indices from the smoothed stack, which is the published order.
+They previously disagreed, because the sequence was written out twice.
 
-**`src/segmentation/final_areas.py`** — the real batch job. Loops every glacier in the landing zone,
+**`glacierview areas`** — the batch job. Loops every glacier in the landing zone,
 and for each one computes areas three ways (no threshold, thresholded, binarized), resizes
 predictions **back to the image's original size** before counting, converts to km² with `* 0.0009`,
 averages per year, and merges into three wide CSVs (one column per glacier). Also writes GIFs.
-Every glacier is wrapped in `try: … except: print(f"Error {glims_id}")` — so a run can appear to
-succeed while silently failing on most glaciers. **Always check the count of `Error` lines.**
+Each glacier is isolated: a failure is logged with a traceback, counted, and the run continues.
+**Read the summary it prints** — and the exit code, which is non-zero if anything failed.
 
 ### Stage 8 — Analysis
 
-**Where:** `src/segmentation/areas_true_vs_predicted_final.ipynb`
+**Where:** `notebooks/analysis/areas_true_vs_predicted.ipynb`
 
 Compares the model's areas against GLIMS `db_area`, grouped by region. **Its four input CSVs were
 missing and have now been recovered** — they live in `data/analysis/`; see Part 8 for what each
@@ -528,90 +529,84 @@ trusting or reproducing the weighting.
 
 ## Part 4 — Code tour: what every file is
 
-### `src/glims/` — glacier selection
+The repository is one installable package plus notebooks. Everything that runs
+the same way every time is in the package and driven from the CLI; notebooks
+are for work that wants cell-by-cell iteration.
+
+```
+src/glacierview/        the package
+notebooks/              pipeline / exploration / analysis
+sql/                    Athena queries
+data/                   committed reference data and a training fixture
+docs/                   this guide, the design doc, the model manifest
+figures/                diagrams and plots
+.agents/                agent-facing rules, context, skills, references
+```
+
+### `src/glacierview/` — the package
+
+| Module | Role |
+|---|---|
+| `config.py` | Every path and constant. Derived from `GV_REPO_ROOT` and `GV_DATA_ROOT`, both environment-overridable, so the ~110 GB of imagery need not sit in the checkout. **Run `glacierview config` to see everything resolved** — it is the fastest way to diagnose a path problem. |
+| `log.py` | Logging setup. Named `log` so it does not shadow stdlib `logging`. |
+| `rasters.py` | Reads GeoTIFFs and DEMs into HWC arrays, clamping negatives and `-inf` to zero. `get_rasters` takes an optional `filtered_file_path` — a CSV of filenames — which is how the metadata quality filter is applied before anything reaches memory. |
+| `preprocess.py` | The shared pipeline: select common bands per satellite, normalize, resize to 128×128, stack the DEM, prepend NDSI and NDWI. Both inference paths use it, so they cannot drift. |
+| `bands.py` | Pure data: per-satellite band-name→index maps. The `extra*` padding entries must stay — the selection mask is positional over the raster's band axis. |
+| `viz.py` | Plotting helpers for eyeballing rasters in notebooks. |
+| `models/unet.py` | **The only definition of the model.** `IN_CHANNELS = 9`. |
+| `models/checkpoints.py` | `load_checkpoint` and `save_state_dict`. Isolates the pickle quirk described in Part 7. |
+| `earthengine/export.py` | The `EePull` class: one method per Landsat satellite plus NASADEM, with server-side filtering. |
+| `inference/predict.py` | The shared core: build inputs, predict, convert masks to km². |
+| `inference/render.py` | GIFs and area plots. Uses a headless matplotlib backend. |
+| `inference/batch.py` | The whole-landing-zone runner, with per-glacier failure isolation and a summary tally. |
+| `training/dataset.py` | `build_manifest` (pairs images to masks on GLIMS ID) and `GlacierDataset`. |
+| `training/losses.py` | Cross-entropy, Dice, and local `dice_score` / `jaccard_index` metrics. |
+| `training/trainer.py` | `TrainConfig`, the epoch loop, eval-based model selection, scoring. |
+| `cli.py` | `glacierview {config,infer,areas,train}`. |
+
+### `notebooks/`
+
+See `notebooks/README.md` for a per-notebook description. In short:
+
+- **`pipeline/`** — 10 numbered steps that build the datasets. Kept as
+  notebooks because each runs rarely and involves judgement about what to keep.
+  They are drivers: the logic they call lives in the package.
+- **`exploration/`** — 6 sandboxes. Not expected to run top to bottom.
+  `inspect_training_data.ipynb` is the best first look at the actual data.
+- **`analysis/`** — the published area analysis.
+
+### `sql/` — Athena queries
 
 | File | Role |
 |---|---|
-| `src/glims_processor.ipynb` | **Live.** Stage 1. GLIMS → filtered set + bounding boxes. Also generates the figures in `figures/`. |
-| `src/glims_to_parquet.ipynb` | **Live.** Adds `geog_area_rollup` (the region mapping dict lives here), drops geometry, writes `glims_18k.parquet` for Athena. |
-| `src/glims_exploratory_data_analysis.ipynb` | Exploration. Region/locality summaries and plots. |
+| `training_data_query.sql` | One representative summer image per glacier. |
+| `inference_data_query.sql` | All qualifying summer images per glacier (`rank_score` commented out — that one line is the difference between a snapshot and a 40-year series). |
+| `identify_inference_glims_ids_geog_area_rollup_50.sql` | Top 50 glaciers per region by `db_area`. |
+| `denormalized_training_metadata.sql` | De-dupes `ee_metadata` by version, coalesces the two image-quality columns. |
 
-### `src/earth_engine/` — data acquisition
+**The 250-per-region selection query does not exist.** Its imagery and Athena
+tables do. Adapt the `_50` query: `geog_size_rank <= 250`, pointed at the
+`_250` tables.
 
-**Note: this whole directory is untracked in git.** It exists on disk but was never committed.
+### `data/`
 
-| File | Role |
+| Path | Role |
 |---|---|
-| `src/gee_readers/ee_helpers.py` | **Live, the core.** The `EePull` class. Only real module here. |
-| `src/gee_readers/ee_pull_time_series.ipynb` | **Live.** Drives `EePull` for the full inference time series. |
-| `src/gee_readers/ee_pull_training.ipynb` | **Live.** Same, for the one-image-per-glacier training pull. |
-| `src/gee_readers/ee_pull_dems.ipynb` | **Live.** Pulls one NASADEM per glacier. |
-| `src/gee_readers/ee_list_of_all_files_pulled.ipynb` | Utility — inventories what was downloaded. |
-| `src/gee_readers/get_s3_data.ipynb` | Utility — S3 fetch helper. |
-| `src/metadata/time_series_metadata_handler.ipynb` | **Live.** Stage 3 for inference data. |
-| `src/metadata/training_metadata_processor.ipynb` | **Live.** Stage 3 for training data. |
-| `src/metadata/metadata_exploratory_data_analysis.ipynb` | Exploration — this is where the filter thresholds were chosen from real distributions. Read it to understand *why* the numbers are what they are. |
-
-### `src/sql/` — Athena queries
-
-| File | Role |
-|---|---|
-| `training_data_query.sql` | **Live.** One representative summer image per glacier. |
-| `inference_data_query.sql` | **Live.** All qualifying summer images per glacier (`rank_score` commented out). Produced `filtered_inference_data.csv`. |
-| `identify_inference_glims_ids_geog_area_rollup_50.sql` | **Live.** Top 50 glaciers per region. |
-| *(none)* | **The 250-per-region selection query does not exist.** An empty 0-byte placeholder for it was deleted, since it read as a real query. Adapt the `_50` query above: change `geog_size_rank <= 50` to `<= 250` and point it at the `_250` tables. |
-| `denormalized_training_metadata.sql` | Helper — de-dupes `ee_metadata` by version per file, coalesces `image_quality`/`image_quality_oli`. |
-
-### `src/segmentation/` — the model and inference
-
-**Shared helper modules** (`helpers/`) — imported by nearly everything:
-
-| File | Role |
-|---|---|
-| `read.py` | **Live.** `get_rasters()` (dir → `{filename: HWC array}` dict, clamping `-inf` and negatives to 0), `get_dem()`, `reproject_raster()`. |
-| `preprocess.py` | **Live.** `get_common_bands()`, `normalize_rasters()`, `resize_rasters()`. The heart of cross-satellite normalization. |
-| `landsat_bands.py` | **Live.** Pure data: the per-satellite band-name→index table. |
-| `explore.py` | Plotting helpers for eyeballing rasters in notebooks. |
-| `model.py` | **DEAD.** TensorFlow/Keras from a previous iteration. Don't extend. |
-
-**Scripts:**
-
-| File | Role |
-|---|---|
-| `final_areas.py` | **Live.** Stage 7 batch inference. The main production entry point. |
-| `inference/infer.py` | **Live.** Single-glacier inference + GIF. Contains its own inlined copy of the U-Net. |
-| `inference/cnn.py` | **Live.** The U-Net class that `final_areas.py` imports. Also contains unused experimental variants: `AUNet`, `AUNet_NR`, `AttentionGate`, `Recurrent_block`, `RRCNN_block` (attention and recurrent U-Nets that were tried). Defines `conv_block` **twice** (lines 7 and 207) — verified byte-identical, so harmless, but confusing. |
-| `inference/model.py` | **DEAD.** Another Keras copy. |
-| `training/src/train.py` | **Live.** Stage 6. |
-
-**Notebooks:**
-
-| File | Role |
-|---|---|
-| `mask_creator.ipynb` | **Live.** Stage 5a — polygons → masks, handles the UTM problem. |
-| `get_training_set.ipynb` | **Live.** Stage 5b — assembles image/mask pairs. |
-| `areas_true_vs_predicted_final.ipynb` | **Live but unrunnable** — inputs missing. |
-| `image_preprocessing_dev.ipynb` | Sandbox for the preprocessing functions. Good place to learn what the helpers do. |
-| `band_distributions.ipynb` | Exploration of per-band pixel-value distributions. |
-| `inspect_processed_training_data.ipynb` | Visual QA of the built training set. **Run this first** to see what the data actually looks like. |
-| `reprojection.ipynb` | Reprojection experiments. |
-| `test_saved_model_matt.ipynb`, `test_saved_model_somansh.ipynb` | Two people's model-testing notebooks. Useful as worked examples of loading a checkpoint and predicting. |
-| `glacier_segmentation-updated.ipynb` | An older end-to-end train+predict notebook, superseded by `train.py`. |
+| `analysis/` | Four committed CSVs the analysis notebook reads. See Part 8. |
+| `sample/training/` | 32 image/mask pairs, so `glacierview train` can be smoke tested with no download. |
+| `glims_18k.parquet` | The glacier table Athena reads. |
 
 ### Elsewhere
 
 | Path | Role |
 |---|---|
-| `low_level_design.md` | The LLD. Read for rationale; verify its specifics. |
-| `AGENTS.md`, `.agents/` | Agent-facing guidance, split into rules (how to behave), context (what to know), skills (how to do a task) and references. `CLAUDE.md` is a symlink to `AGENTS.md`, so Claude Code and Codex read the same entrypoint. |
-| `figures/` | Diagrams and plots, including `data_collection_and_preprocessing.drawio` (editable pipeline diagram) and the UTM-overlap illustrations. **Look at these early** — they explain the pipeline faster than prose. |
-| `src/styles/ieee.mplstyle` | Shared matplotlib style for publication-ready plots. |
-| `figures/inventory-examples/` | Screenshots showing why the RGI and GlobGlacier outlines were excluded. |
-| `qgis/` | A QGIS project file — QGIS is the standard desktop GIS tool, useful for eyeballing a GeoTIFF against a basemap. |
-| `figures/cnn_architecture.png` | The U-Net architecture diagram, shown in the README. |
-| `src/segmentation/gifs/` | Output GIFs from previous runs — ~150 of them. Watch a few; they make the whole project click. |
+| `docs/low_level_design.md` | The original design doc. Read for rationale; its specifics have drifted. |
+| `docs/MODEL_MANIFEST.md` | Per-checkpoint record: channel count, SHA-256, training recipe. |
+| `AGENTS.md`, `.agents/` | Agent-facing guidance. `CLAUDE.md` is a symlink to `AGENTS.md`. |
+| `figures/` | Diagrams and plots; `figures/README.md` says what each shows. **Look at these early.** |
+| `qgis/` | A QGIS project — useful for eyeballing a GeoTIFF against a basemap. |
+| `src/segmentation/gifs/` | ~150 output GIFs from previous runs. Watch a few; they make the project click. |
 
----
 
 ## Part 5 — The AWS account
 
@@ -774,9 +769,9 @@ G007026E45991N_1984-04-09_L5_C02_T1_L2_SR.tif
 Split on `_`:
 - **token 0** → the GLIMS ID
 - **token 1** → the date, parsed with `datetime.strptime(..., '%Y-%m-%d')` in `infer.py:67` and
-  `final_areas.py`
-- **token 2** → the satellite, lowercased and looked up in `landsat_bands.py` by
-  `preprocess.get_common_bands()` (`helpers/preprocess.py:9`)
+  the batch runner
+- **token 2** → the satellite, lowercased and looked up in `glacierview.bands` by
+  `glacierview.preprocess.get_common_bands()`
 
 **Rename a file and the pipeline silently misreads its bands or its date.** Any new data must follow
 this exact pattern.
@@ -806,286 +801,239 @@ visible discontinuity in the area plot — an artifact of preprocessing, not rea
 
 ---
 
-## Part 7 — The model contract (and the channel bug)
+## Part 7 — The model contract
 
 ### Architecture
 
-A U-Net with a ResNet-50 encoder, in PyTorch. Defined **three times**, in
-`training/src/train.py`, `inference/cnn.py`, and inlined inside `inference/infer.py`.
+A U-Net with a ResNet-50 encoder, in PyTorch, defined once in
+`glacierview/models/unet.py`.
 
 ```
 input (N, 9, 128, 128)
    │
    ├─ ResNet-50 encoder, first conv replaced:
    │     nn.Conv2d(9, 64, kernel_size=7, stride=2, padding=3, bias=False)
-   │     ← ImageNet ResNet expects 3 channels; we have 9
-   │  (ImageNet weights kept for all later layers; last two ResNet layers removed)
-   │  → output: 2048 channels at 4×4
+   │  (ImageNet weights kept for later layers; last two ResNet layers removed)
+   │  → 2048 channels at 4×4
    │
-   └─ decoder: 5 × ConvTranspose2d + BatchNorm + conv_block
-         skip connections from encoder stages x2, x4, x5, x6
-         plus the raw input concatenated at the last level
+   └─ decoder: 5 × ConvTranspose2d + BatchNorm + conv_block,
+        skip connections from encoder stages x2/x4/x5/x6,
+        raw input concatenated at the last level
    │
    └─ classifier: Conv2d(16, 2, kernel_size=1) → 2-class logits
 ```
 
-The two output channels are glacier and background, and one is the complement of the other. Two
-channels rather than one only because PyTorch's cross-entropy expects `num_classes` outputs.
+The two output channels are glacier and background, one the complement of the
+other; two rather than one only because PyTorch's cross-entropy expects
+`num_classes` outputs.
 
-Glacier probability = `softmax(logits, dim=1)[:, 1]`, thresholded at 0.5.
-Area = `mask.sum() * 0.0009` km² (900 m² per 30 m pixel), computed **after** resizing the prediction
-back to the image's original dimensions.
+Glacier probability is `softmax(logits, dim=1)[:, 1]`, thresholded at 0.5.
+Area is `mask.sum() * 0.0009` km², computed **after** resizing back to the
+scene's native resolution.
 
-### The checkpoints take 9 channels — and most of the code says 10
-
-This is the single most important thing to understand in this repo, and the paper is what settles it.
-
-The paper's channel figure lists exactly nine, with an editorial note reading **"Remove SWIR2 because
-of quality"** and a caption reading "The 9 channels used in the CNN":
+### Nine input channels
 
 ```
 0: NDWI   1: NDSI   2: blue   3: green   4: red   5: nir   6: swir   7: thermal   8: DEM
 ```
 
-I confirmed this against the checkpoint files themselves, without needing torch. A PyTorch `.pt` is a
-zip of raw tensors, so the stem convolution's byte size gives its input channel count directly:
+`swir_2` is excluded deliberately — the paper's channel figure says so
+("Remove SWIR2 because of quality") and its caption reads "The 9 channels used
+in the CNN". The count is declared once, as `IN_CHANNELS` in
+`glacierview/models/unet.py`, and derived everywhere else:
 
-| Tensor | 9-channel size | 10-channel size | Found in both checkpoints |
-|---|---|---|---|
-| stem `Conv2d(C,64,7,7)` | **112,896 B** | 125,440 B | 112,896 ✅ |
-| `c5` = `conv_block(32+C,16)` | **23,616 B** | 24,192 B | 23,616 ✅ |
+| Source | Channels |
+|---|---|
+| `config.COMMON_BANDS` | 6 bands + DEM = 7 → +NDSI +NDWI = **9** |
+| training data on disk | 7-channel tifs → **9** |
+| `IN_CHANNELS` | **9** |
 
-Two independent tensors agree, in both `unet_summer_model_unfrozen_100` and `saved_models/model`.
-**The trained models take 9 input channels.** `swir_2` was deliberately dropped for quality.
+Every entry point asserts its built tensor matches before the first
+convolution, so a mismatch names the offending file instead of failing inside
+a bare `except`.
 
-Now compare what each entry point actually builds:
+*History worth knowing:* three source files once built 10 channels against
+these 9-channel checkpoints, so inference failed on every glacier — silently,
+because of that bare `except`. The paper's body text still says 10 where its
+own figure says 9. The figure is right, and the checkpoints settle it: their
+stem convolution is `Conv2d(9,64,7,7)`.
 
-| Entry point | `common_bands` | + DEM | + indices | Total | vs. a 9-ch checkpoint |
-|---|---|---|---|---|---|
-| `get_training_set.ipynb` | 6 — no `swir_2` | 7 | +NDSI +NDWI | **9** | ✅ **correct** |
-| training data on disk | — | — | — | 7-channel tifs → **9** | ✅ **correct** |
-| `final_areas.py:101` | 6 — no `swir_2` | 7 | +NDSI +NDWI **+ a duplicated NDWI** | **10** | ❌ shape error |
-| `inference/infer.py:39` | 7 — *includes* `swir_2` | 8 | +NDSI +NDWI | **10** | ❌ shape error |
-| `train.py` | hardcodes `Conv2d(10,…)`; normalize indexes `image[0]`…`image[7]` | — | — | 8→**10** | ❌ stale |
+### Why checkpoints are awkward, and how that is handled
 
-So the **data is right and the scripts are wrong.** The 7-channel training tifs on disk (verified:
-`SamplesPerPixel: 7`) and the notebook that built them match the trained models exactly. Three
-source files were never updated when `swir_2` was dropped.
-
-The fixes are small:
-
-- **`final_areas.py`** — delete the duplicated-NDWI line. Its own comment already tells you to:
-  ```python
-  inputs = torch.cat((ndwi, inputs), dim=1)   # REMOVE THIS LINE - only for testing
-  ```
-  Removing it takes 10 → 9 and makes the script correct. The comment is not a warning to ignore; it
-  is the instruction.
-- **`infer.py`** — drop `'swir_2'` from `common_bands` (8 → 7 → 9 total) and change the inlined
-  `Conv2d(10, …)` to 9.
-- **`train.py`** — change `Conv2d(10, …)` to 9, and fix the normalize block from 8 channels to 7.
-
-**Why nobody noticed:** `final_areas.py` wraps every glacier in a bare `except:`, so a shape mismatch
-prints `Error {glims_id}` and moves on. A full run over 245 glaciers can fail on *all* of them and
-still exit cleanly with the three aggregate CSVs sitting there (empty). Always count the `Error` lines.
-
-One subtlety: the hardcoded `10` in the class definitions does **not** prevent loading a checkpoint.
-`torch.load` of a pickled module restores the real layer shapes and never re-runs `__init__`. The
-hardcoded value only matters when you construct a fresh `UNet()` to train from scratch.
-
-### Why the checkpoints are awkward to load
-
-`torch.save(model)` saves the whole live Python object, not just the weights. Reading the pickle's
-string table shows it references **`__main__.UNet`** and **`__main__.conv_block`** — because
-`train.py` saved it while running as a script.
-
-That means the class definitions must exist in the **`__main__`** namespace at load time. This
-explains an otherwise baffling code smell: `infer.py` inlines a whole copy of the U-Net because it
-*has to*, and `final_areas.py`'s `from inference.cnn import UNet, conv_block` works only because
-`final_areas.py` is itself `__main__` when run as a script. Try loading a checkpoint from a fresh
-notebook and you get:
+Checkpoints are `torch.save(model)` output — a pickled module, not a state
+dict. The pickle records where the class came from, and the released
+checkpoints were written by a script, so they reference `__main__.UNet` and
+`__main__.conv_block`. Loading one from anywhere else used to raise:
 
 ```
 AttributeError: Can't get attribute 'UNet' on <module '__main__'>
 ```
 
-Consequences: editing `UNet`/`conv_block` can break old checkpoints, so change all three copies
-together; `torch.load("model")` is cwd-relative in both scripts and no file named `model` exists; and
-**converting to a `state_dict` is what makes these portable** — do that before sharing them anywhere.
+`glacierview.models.load_checkpoint` injects those names before unpickling, so
+callers no longer import the classes for their side effect:
+
+```python
+from glacierview.models import load_checkpoint
+model = load_checkpoint("path/to/checkpoint", device="cpu")
+```
+
+It also warns if the checkpoint's channel count differs from `IN_CHANNELS`.
+
+Consequences that remain:
+
+- Renaming or reshaping a layer can stop an existing checkpoint loading.
+- `save_state_dict` is the right export for anything shared outside this repo:
+  a state dict carries no class references and no code-execution risk.
 
 ### The two checkpoints
 
 | File | Date | Size | Channels |
 |---|---|---|---|
-| `src/segmentation/unet_summer_model_unfrozen_100` | 2024-10-02 | 343,522,287 B | 9 |
-| `src/segmentation/saved_models/model` | 2023-12-27 | 343,487,293 B | 9 |
+| `unet_summer_model_unfrozen_100` | 2024-10-02 | 343,522,287 B | 9 |
+| `saved_models/model` | 2023-12-27 | 343,487,293 B | 9 |
 
-Different SHA-256, ~10 months apart, and nothing on disk records which is which or how they differ.
-`saved_models/` also holds **18 legacy Keras `.h5` files** (2022–2023, ~25 MB each) whose filenames
-are a record of the band-selection experiments: `bl_gr_re_ni_sw_th_de_v{0,1,2}.h5` is
-blue/green/red/nir/swir/thermal/dem, `re_ni_sw_de_v1.h5` is red/nir/swir/dem — and that last one is
-the file `infer.py`'s commented-out Keras block used to load.
+Different weights, ~10 months apart, and nothing records which produced the
+paper's 0.92 Dice. Both plus 18 legacy Keras `.h5` files are backed up to
+`s3://segmentation-model-gv/checkpoints/` with a `MANIFEST.md`. Bucket
+versioning there is still off, so an overwrite is unrecoverable.
 
-### The published training recipe
+### Training recipe
 
-From the paper. Note it differs from the script's defaults in one important way:
+The CLI defaults **are** the published recipe:
 
-| | Paper | `train.py` default |
-|---|---|---|
-| learning rate | 0.00001 | 0.00001 ✅ |
-| **batch size** | **32** | **2** ❌ |
-| encoder weights | unfrozen | unfrozen ✅ |
-| loss | cross-entropy | `LOSS = 'ce'` ✅ |
-| threshold | 0.5 | 0.5 ✅ |
-| optimizer | Adam | Adam ✅ |
-| data split | 6,456 train / 359 eval / 359 test, of 7,174 | 90/10, no eval set |
-| model selection | epoch minimizing eval cross-entropy | whatever the last epoch gives |
+| | Value |
+|---|---|
+| learning rate | 0.00001 |
+| batch size | 32 |
+| encoder | unfrozen |
+| loss | cross-entropy |
+| threshold | 0.5 |
+| optimizer | Adam |
+| split | 90 / 5 / 5 |
+| model selection | epoch minimising eval loss |
 
-Hyperparameters were tuned on a random 4,000-image subset (3,600 train / 400 eval, 20 epochs):
+Augmentation: vertical flip, horizontal flip, and a 3×3 Gaussian blur
+(σ = 0.8), each applied **independently at p = 0.5** — about 75% more data,
+not the 4× you would get applying all three every time.
 
-| LR | Batch | Cross-entropy |
-|---|---|---|
-| 0.001 | 16 | 3.35 |
-| 0.0001 | 16 | 0.68 |
-| 0.00001 | 16 | 0.50 |
-| 0.00001 | 8 | 0.53 |
-| **0.00001** | **32** | **0.49** ← chosen |
-
-Augmentation: vertical flip, horizontal flip, and a 3×3 Gaussian blur (σ = 0.8), each applied
-**independently with probability 0.5**. That's a ~75% increase in training data (to 11,298 images),
-not the 4× you'd get from applying all three to every image — so p(no transform) = 0.125.
-
-Reported result: **Dice 0.92** on the test set. The ablation trail, from the paper's notes:
+Reported result: **Dice 0.92**. The ablation trail from the paper:
 
 | Change | Dice |
 |---|---|
 | 3,000 images, no transfer learning | 0.83 |
 | + transfer learning (ImageNet ResNet-50) | 0.86 |
 | + NDSI & NDWI channels | 0.88 |
-| + full dataset, cross-entropy loss | **0.92** |
-| (same, Dice loss instead) | 0.90 |
+| + full dataset, cross-entropy | **0.92** |
+| (Dice loss instead) | 0.90 |
 | frozen encoder | 0.91 |
 | ResNet-18 instead of ResNet-50 | 1–2% worse |
 
-Threshold sweep: 0.1 → 0.16, 0.4 → 0.923, **0.5 → 0.926**, 0.8 → 0.87. So 0.5 is empirically
-optimal, not just conventional.
+Threshold sweep: 0.1 → 0.16, 0.4 → 0.923, **0.5 → 0.926**, 0.8 → 0.87. So 0.5
+is empirically optimal, not merely conventional.
 
-Cross-entropy was chosen over Dice loss deliberately: it penalizes *confidence*, not just
-correctness, which suits blurry ice/rock boundaries. Class imbalance is mild here (glacier and
-background pixels are roughly balanced in these crops), so focal loss wasn't needed.
+⚠️ **Two bugs in the original training loop are fixed, and both change
+behaviour.** `optimizer.zero_grad()` was never called, so gradients
+accumulated across an entire epoch; and only the last batch's loss was
+recorded per epoch. The published checkpoint was trained *with* those bugs, so
+reproducing its exact numbers needs the pre-refactor script from git history.
 
+---
 
-## Part 8 — What's missing, broken, or unbacked
+## Part 8 — Data state, and what is still open
 
-Established by diffing local inventories against S3 and by reading the code.
+### Present and working
 
-### 🔴 Blocking — you cannot run inference without fixing these
-
-| # | Problem | Detail |
-|---|---|---|
-| 1 | **All inference imagery is absent locally** | `full_time_series_c02_t1_l2/landsat/` is empty. It used to live on an external SSD — `time_series_metadata_handler.ipynb` still points at `/Volumes/T7/GlacierView/ee_landing_zone/...`, which isn't mounted. Good news: nothing is missing *upstream*. All 245 glaciers in `filtered_inference_data.csv` and all 1,024 in `geog_area_rollup_250.csv` exist in S3. |
-| 2 | **No file named `model`** | Both inference scripts `torch.load("model")` relative to cwd. Copy or symlink `src/segmentation/unet_summer_model_unfrozen_100`. |
-| 3 | **`data_label` points at an empty directory** | `infer.py:31` sets `data_label = "full_time_series"`, and `final_areas.py:90`/`:94` inline that same string directly into the path — no `_c02_t1_l2` suffix in either. That directory exists but is empty; all real data is under `full_time_series_c02_t1_l2`. Fix the constant or symlink. |
-| 4 | **`glacier_areas/` is never created** | `final_areas.py` writes `f"glacier_areas\\{glims_id}_areas.csv"` — a directory it never `mkdir`s, using a **Windows path separator on macOS**. Every iteration throws into the bare `except`, so the per-glacier CSVs silently never appear while the three aggregate CSVs do. A run looks successful. |
-| 5 | **Both inference scripts build 10 input channels; the checkpoints take 9** | Every glacier throws a shape error into the bare `except`, so a full run produces nothing but `Error` lines and three empty aggregate CSVs. A three-line fix — see Part 7. |
-| 6 | **`train.py` is stale against both the data and the checkpoints** | Its normalize block indexes `image[7]` on 7-channel tifs (`IndexError`), and it hardcodes a 10-channel stem. The data is correct; the script is not. See Part 7. |
-
-### 🟡 Missing but regenerable
-
-`areas_no_threshold.csv`, `areas_05_thresh.csv`, `areas_binary_05.csv` — `final_areas.py` creates
-these on startup.
-
-### ✅ Recovered — the four analysis CSVs (2026-09-19)
-
-These were missing when this document was first written (the LLD recorded them as *"somansh will push
-to github and email me"*). They have since been added and live in **`data/analysis/`**, committed —
-the blanket `*.csv` ignore carries a negation for that directory. The notebook resolves them through
-an `ANALYSIS_DIR` constant derived from its own location, so it works wherever Jupyter starts.
-
-| File | Shape | What it actually is |
-|---|---|---|
-| `geo_areas.csv` | 18,093 × 32 | **The `glims_18k` table itself.** Full GLIMS attributes per glacier: `glac_id`, `db_area`, `area`, `geog_area`, **`geog_area_rollup`**, `bboxes`, `min/mean/max_elev`, `src_date`, `glac_name`, `analysts`, `submitters`. This is the join key for regional grouping. |
-| `training_data_set.csv` | 10,447 × 12 | Output of `training_data_query.sql` — one row per candidate training image with `cloud_cover`, `image_quality`, `num_pixels`, `percentage_zero_pixels`, `rank_score`. This is the paper's stale "10,443"; the empty-mask variance filter reduces it to the 7,174 actually trained on. |
-| `training_areas.csv` | 3 × 260 | A small transposed lookup — ~259 glacier IDs mapped to areas. |
-| `areas_binary_05_filtered_smooth_25.csv` | 541 dates × **245** glaciers | Smoothed `final_areas.py` output in wide format. The 541 rows are monthly timestamps — exactly `pd.date_range('1979-01-01','2024-01-01',freq='MS')`, which is the range hardcoded in `final_areas.py`. |
-
-Two things to notice:
-
-⚠️ **The areas CSV covers 245 glaciers, but the paper reports 1,083.** So this is the output of the
-older 50-glaciers-per-region run, *not* the run behind the paper's headline −0.199%/yr. Whatever
-produced the paper's numbers is still unaccounted for. If you're trying to reproduce the paper, this
-is your first blocker.
-
-⚠️ **`geo_areas.csv` includes an Oceania rollup (35 glaciers)** — Asia 12,625 / North America 3,704 /
-South America 872 / Europe 602 / Caucausus 255 / Oceania 35. The SQL treats Oceania as southern
-hemisphere, but it never appears among the paper's five regions. Those 35 glaciers drop out somewhere
-between selection and results, and nothing documents where.
-
-### 🔵 Present locally but backed up nowhere
-
-This is the risk that should worry you most, because it's silent:
-
-| Asset | Situation |
-|---|---|
-| ~~Model checkpoints~~ | ✅ **Resolved 2026-09-19.** Both PyTorch checkpoints and all 18 legacy Keras files are now in `s3://segmentation-model-gv/checkpoints/` (us-east-1), alongside a `MANIFEST.md` recording channel counts, SHA-256s and the training recipe. 20 objects, byte-verified. ⚠️ Bucket **versioning is still off** — an overwrite cannot be undone; enable it before re-uploading. |
-| 148 training glaciers | Local has 18,093 glacier dirs; `raw-training-images-t1-l2-sr` has 17,945. 148 exist only locally. |
-| All 18,093 training-landing-zone DEMs | There is **no training DEM bucket at all**. |
-| Derived metadata CSVs | `denormalized_metadata.csv`, `filtered_training_data.csv`, `filtered_training_data_summer_months.csv`, `filtered_inference_data.csv`, `net_new_glims_ids_for_segmentation.csv` — the buckets hold only the four crawled tables, not these. |
-| `src/glims/data/glims_db_20210914/` | The source GLIMS inventory, 20 files. Only the *derived* `glims_18k.parquet` is in S3. (Re-downloadable from GLIMS, but it's a dated snapshot — a fresh download would differ.) |
-| `src/earth_engine/` source code | The entire directory is untracked in git. The `EePull` class exists only on this machine. |
-
-### ✅ Confirmed complete and healthy
-
-- **Ready-to-train data** — `processed_training_data_summer_months/` holds 7,174 images + 8,902
-  masks, an exact mirror of `training-images-t1-l2-sr` (7,174 + 8,902 + 2 `.DS_Store` = the bucket's
-  16,078 objects). (Caveat: it's the 7-channel vintage — see Part 7.)
-- **Raw training data** — 18,093 glacier dirs of imagery and DEMs, plus `masks_staging_2/`.
-- **Inference DEMs** — all 1,122, byte-identical ID set to the bucket.
+- **The package** — installs with `uv sync`, all submodules import, all CLI
+  subcommands run, a released checkpoint loads and runs a forward pass.
+- **Training data** — 7,174 image/mask pairs. `build_manifest` yields
+  6,453 train / 359 eval / 359 test, matching the paper's 6,456/359/359.
+- **A training fixture** — `data/sample/training`, 32 pairs, committed. Enough
+  to smoke test training with no download.
+- **Inference DEMs** — all 1,122, matching the bucket's ID set exactly.
 - **Inference metadata** — the four table CSVs plus `filtered_inference_data.csv`.
+- **Analysis inputs** — the four CSVs in `data/analysis/`:
 
-One curiosity: **21 glaciers have DEMs in S3 but no imagery.** All are far-north (Ellesmere Island),
-consistent with the SQL comment about excluding Canada for lack of DEM coverage — so they look
-deliberately dropped after the DEM pull, not lost.
+| File | Shape | What it is |
+|---|---|---|
+| `geo_areas.csv` | 18,093 × 32 | The `glims_18k` table: `glac_id`, `db_area`, `geog_area`, `geog_area_rollup`, `bboxes`, elevations. The join key for regional grouping. |
+| `training_data_set.csv` | 10,447 × 12 | Output of `training_data_query.sql` — candidate training images with quality metadata. This is the paper's stale "10,443". |
+| `training_areas.csv` | 3 × 260 | A transposed lookup: ~259 glacier IDs → areas. |
+| `areas_binary_05_filtered_smooth_25.csv` | 541 dates × **245** glaciers | Smoothed batch output, wide format. |
+
+### The one blocking gap
+
+**Inference imagery is absent locally.** `landsat/` under the inference
+landing zone is empty; that tree lived on an external SSD. Nothing is missing
+*upstream* — every glacier needed exists in S3. Refilling is 23.7 GB for the
+filtered set, not the bucket's 486 GB. See Part 9.
+
+### Still open
+
+1. **Where is the 1,083-glacier areas output?** The paper's −0.199%/yr comes
+   from 1,083 glaciers, but the recovered CSV covers 245. The artifact behind
+   the published numbers is unaccounted for. This is the first blocker for
+   reproducing the paper.
+2. **The 250-per-region selection query** was never committed, though its
+   imagery and Athena tables exist.
+3. **Cloud-cover threshold: 5, 10 or 20?** The SQL says `< 5`, the design doc
+   and the Earth Engine filter say 10, the paper's Trient case study says 20.
+4. **The regression weighting** may be inverted: the paper's formula computes
+   the proportion of data *missing* while the text claims it upweights
+   *complete* series. This affects every published regional average.
+5. **Which checkpoint produced the 0.92 Dice** is unrecorded.
+6. **35 Oceania glaciers** appear in `geo_areas.csv` and are treated as
+   southern-hemisphere by the SQL, but never appear among the paper's five
+   regions.
+
+### Backed up, and not
+
+Backed up to S3: both checkpoints, the legacy Keras files, all imagery and
+metadata, the derived Parquet.
+
+**Not backed up anywhere but one laptop:** the ~18,093 training-landing-zone
+DEMs (there is no training DEM bucket), 148 raw training glaciers that are
+local-only, the derived metadata CSVs, and `src/glims/data/glims_db_20210914/`
+— the dated GLIMS snapshot the whole selection derives from.
 
 ---
 
 ## Part 9 — Getting set up
 
-### Step 0 — install the environment
-
-The project uses [uv](https://docs.astral.sh/uv/) for dependency management. One command:
+### Step 0 — install
 
 ```bash
 uv sync
 ```
 
-That reads `pyproject.toml`, installs the exact versions pinned in `uv.lock` into `.venv/`, and
-downloads CPython 3.12 if you don't already have it (the version is pinned in `.python-version`).
-Then either prefix commands with `uv run`, or activate `.venv` the usual way.
+Reads `pyproject.toml`, installs the versions pinned in `uv.lock` into
+`.venv/`, and downloads CPython 3.12 if absent (pinned in `.python-version`).
+Then either prefix with `uv run` or activate `.venv`.
 
 ```bash
-uv run python src/segmentation/inference/infer.py --glimsid G007026E45991N
-uv run jupyter lab          # notebook deps are in the "notebook" group, installed by default
+uv run glacierview --help
+uv run jupyter lab          # notebook deps install by default
 ```
 
-Verified working: all 24 third-party imports resolve on Python 3.12, and a released checkpoint loads
-and runs a forward pass. Dependencies were derived by scanning every `import` in `src/` rather than
-inherited from the old `requirements.txt`.
+`requires-python` is capped at `<3.13`: uncapped, uv resolves against 3.14,
+where rasterio, geopandas and torch have no wheels. If you widen it, re-run
+`uv lock` **and** `uv sync`.
 
-**Why `requires-python` is capped at `<3.13`:** the geospatial stack (rasterio, geopandas) and torch
-lag behind new interpreter releases. Left uncapped, uv resolves against 3.14 and you get wheels that
-don't exist. If you widen it, re-run `uv lock` and actually `uv sync` to check.
+PyPI's torch gives a CPU/MPS build on macOS and a bundled-CUDA build on Linux.
+The published model was trained against cu118; `pyproject.toml` carries a
+commented `[[tool.uv.index]]` block for pinning that exactly.
 
-**If you need a specific CUDA build:** PyPI's torch gives a CPU/MPS build on macOS and a
-bundled-CUDA build on Linux, which covers both a laptop and a GPU box. The published model was
-trained against cu118 — `pyproject.toml` carries a commented `[[tool.uv.index]]` block for pinning
-that exactly.
+### Step 1 — check the paths
 
-*Historical note, in case you find old instructions:* `requirements.txt` was removed in favour of
-`pyproject.toml`. It could not be installed as written — it was UTF-16 encoded with CRLF line
-endings, pinned `torch~=2.1.0+cu118` (no such wheel exists for macOS), and omitted 13 packages the
-code imports. The `src/segmentation/training/src/requirements.txt` beside it was a 200-line frozen
-`pip freeze` of someone's entire 2021 environment, including `pywin32`.
+```bash
+uv run glacierview config
+```
 
+Prints every resolved path and marks what is missing. Nothing is hardcoded to
+one machine: point the data root anywhere, for instance at an external disk.
+
+```bash
+export GV_DATA_ROOT=/Volumes/T7/GlacierView
+```
 
 ### Step 2 — credentials
 
@@ -1093,136 +1041,110 @@ code imports. The `src/segmentation/training/src/requirements.txt` beside it was
 aws sts get-caller-identity     # confirm you are in the project AWS account
 ```
 
-For Earth Engine (only needed if you're pulling *new* imagery — you probably aren't yet):
-`ee.Authenticate()` once in a notebook, then `ee.Initialize()`.
+Earth Engine is only needed to pull *new* imagery: `ee.Authenticate()` once,
+then `ee.Initialize()`.
 
-### Step 3 — fix the hardcoded paths
-
-Notebooks hardcode `~/Desktop/projects/GlacierView` as the project root and `sys.path.insert` the
-helpers directory. If your checkout is elsewhere, you'll be editing that line in every notebook.
-Scripts under `src/segmentation/` use `Path(__file__).parent...` and are fine.
-
-### Step 4 — smoke test on one glacier
-
-Don't start with 486 GB. Start with Trient (`G007026E45991N`), ~700 MB:
+### Step 3 — smoke test without downloading anything
 
 ```bash
-# 1. get one glacier's imagery
+uv run glacierview train --data-dir data/sample/training --epochs 2 \
+  --batch-size 4 --out-dir /tmp/smoke --device cpu
+```
+
+Two epochs on 28 images. The Dice will be near zero — that is expected from
+scratch — but the loss should fall, which proves the whole path works.
+
+### Step 4 — one glacier, end to end
+
+Trient (`G007026E45991N`) is the documented case, ~700 MB:
+
+```bash
+LZ=$(uv run glacierview config | awk '/landsat_dir/{print $2}')
 aws s3 cp s3://full-time-series-images-t1-l2-sr/G007026E45991N/ \
-  src/earth_engine/data/ee_landing_zone/full_time_series_c02_t1_l2/landsat/G007026E45991N/ \
-  --recursive --region us-west-1 --exclude "*/meta_data/*" --exclude "*.DS_Store"
+  "$LZ/G007026E45991N/" --recursive --region us-west-1 \
+  --exclude "*/meta_data/*" --exclude "*.DS_Store"
 
-# 2. its DEM should already be local; confirm
-ls src/earth_engine/data/ee_landing_zone/full_time_series_c02_t1_l2/dems/G007026E45991N_NASADEM.tif
-
-# 3. put the checkpoint where the script looks
-cd src/segmentation/inference
-ln -s ../unet_summer_model_unfrozen_100 model
-
-# 4. fix data_label in infer.py: "full_time_series" → "full_time_series_c02_t1_l2"
-
-# 5. run
-python infer.py --glimsid G007026E45991N
+uv run glacierview infer --glims-id G007026E45991N \
+  --checkpoint src/segmentation/unet_summer_model_unfrozen_100
 ```
 
-Success looks like a GIF in `src/segmentation/gifs/G007026E45991N.gif` showing the ice boundary over
-time. Compare it against the ~150 GIFs already in that directory from previous runs.
+Success is a GIF showing the ice boundary moving over 40 years. Compare
+against the ~150 GIFs already in `src/segmentation/gifs/`.
 
-**Trient is also your regression test**, because the paper documents it in detail: **464 images** from
-**1984-04-18 to 2023-10-07**, Landsat 5 and 7. Its area declines overall, with most of the loss
-concentrated in **1985–1988** and **2002–2015**, and roughly stable over the last decade; the ice is
-lost at the northern terminus. If your run reproduces that shape, the pipeline is working.
+The paper documents Trient in detail: 464 images, 1984-04-18 to 2023-10-07,
+decline concentrated in 1985–1988 and 2002–2015, roughly stable over the last
+decade. Two caveats — the paper's Trient run used looser filters (cloud < 20,
+zero pixels < 15%), so image counts will not match unless you match the
+filters; and the Swiss GLAMOS inventory measured Trient at 5.76 km² in 2006
+against the model's 4.95 km², a **14% underestimate**. Expect a level offset
+even when the trend is right.
 
-Two caveats on that comparison. The paper's Trient run used *looser* filters than the main SQL —
-cloud cover < 20, zero pixels < 15%, quality ≥ 9, no-data = 0, pixels > 50,000 — so image counts
-won't match unless you match the filters. And a commented-out passage notes the Swiss GLAMOS
-inventory measured Trient at 5.76 km² in 2006 while the model predicted 4.95 km², a **14%
-underestimate** — so expect a level offset even when the trend is right.
+### Step 5 — scaling up without pulling 486 GB
 
-Exclude `.DS_Store` (some are 660 KB — they got uploaded with the tifs) and `meta_data/` (only needed
-for re-running the metadata handler; `read.get_rasters` only globs `.tif` anyway).
+`filtered_inference_data.csv` narrows inference to **245 glaciers / 14,952
+files / 23.7 GB**. `glacierview.rasters.get_rasters` accepts a
+`filtered_file_path`, so the quality filter can be applied at read time rather
+than relying on what you happened to download.
 
-### Step 5 — scaling up, without pulling 486 GB
+`aws s3 sync` was too slow for the original upload; `cp --recursive` is what
+was used. Always exclude `.DS_Store` (some are 660 KB) and `meta_data/`.
 
-The bucket is 486 GB, but the filter narrows inference to **245 glaciers / 14,952 files / 23.7 GB**
-(computed by summing `file size in bytes` from `file_attributes_250.csv` for every file in
-`filtered_inference_data.csv` — all 14,952 matched).
-
-`final_areas.py` calls `read.get_rasters(glacier_dir)` **without** the `filtered_file_path`
-argument, so it processes whatever is on disk. **Downloading only the filtered files is therefore how
-the quality filter gets applied at inference time.** Pull that subset, not the bucket.
-
-(`read.get_rasters` *does* accept `filtered_file_path` — `helpers/read.py:37` — it's just not used
-by `final_areas.py`. Passing it would be a cleaner fix than relying on what you downloaded.)
-
-The LLD notes `aws s3 sync` was too slow for the original upload and `cp --recursive` was used.
-
-### Step 6 — training, if you go there
+### Step 6 — full training run
 
 ```bash
-cd src/segmentation/training/src
-ln -s ../data/processed_training_data_summer_months training_data
-python train.py --epochs 10 --lr 0.00001 --decay 0.00001 --batch 2
+uv run glacierview train --epochs 10 --batch-size 32 --out-dir experiments/run1
 ```
 
-This **will fail** on the channel mismatch (Part 7) until that's resolved: the normalize block
-indexes `image[7]` on 7-channel data, and the stem is hardcoded to 10 channels. `train.py` also
-expects hyperparameters you can't set from the CLI — `LOSS`, `TRANSFORMS`, `NORMALIZE`,
-`UNFREEZE_WEIGHTS` are module-level constants you edit in the file.
+`--data-dir` defaults to `config.training_data_dir()`. Each run writes
+`model.state_dict.pt` and `run.json` (config, per-epoch train and eval losses,
+best epoch, test Dice and Jaccard).
 
-To match the published recipe use `--batch 32` (not the default 2), and be aware the script has no
-eval split and keeps the last epoch rather than the best one. See the recipe table in Part 7.
+### What still does not exist
 
-### What doesn't exist
-
-No test suite, no CI, no Docker, no orchestration. Dependencies are managed (`pyproject.toml` +
-`uv.lock`) and linting is set up — `uv run ruff check .` passes repo-wide. The rule set is pinned
-explicitly in `[tool.ruff.lint]` rather than inherited from ruff's defaults, which widen between
-releases. Notebooks carry documented per-file exemptions for rules that fire on normal notebook
-idioms. `ruff format` is *not* enforced: it would reformat 31 files, mostly exploratory notebooks,
-for no maintainability gain.
-`git status` on a fresh clone will show notebook diffs immediately, because notebooks store their
-output cells — consider `nbstripout` if that bothers you.
+No test suite, no CI, no Docker, no orchestration. Dependencies are managed
+and linting is set up (`uv run ruff check .` passes; `ruff format` is
+deliberately not enforced). Adding a small pytest suite over the pure
+functions — `dice_score`, `areas_km2`, `_to_chw`, `normalize_rasters`,
+`build_manifest` — would be the highest-value next step.
 
 ---
 
 ## Part 10 — Landmines, ranked
 
-Ordered by how likely they are to waste your day.
+Ordered by how likely they are to cost you a day.
 
-1. **The silent `except:` in `final_areas.py`.** Every glacier is wrapped in
-   `try: … except: print(f"Error {glims_id}")`. A run over 245 glaciers can fail on 244 of them and
-   still exit 0 with output files present. **Count the `Error` lines before trusting any output.**
-2. **The 9-vs-10 channel mismatch.** Both inference scripts and `train.py` build 10 input channels;
-   both checkpoints take 9. `final_areas.py` errors on every glacier (silently, see #1);
-   `infer.py` fails the same way. The data on disk is correct — the scripts are stale. Three-line
-   fix in Part 7.
-3. **`full_time_series`** (no `_c02_t1_l2`) is the dataset name baked into both inference scripts —
-   `infer.py:31` as `data_label`, `final_areas.py:90`/`:94` inlined into the path — and it points at an
-   empty legacy directory. You'll get "no such file" or an empty dict and an unhelpful downstream error.
-4. **Three copies of the U-Net.** Edit one and the other two drift; checkpoints are pickled modules,
-   so drift breaks loading.
-5. **`torch.load("model")` is cwd-relative** in both scripts, and no `model` file exists.
-6. **`num_pixels` and `percentage_zero_pixels` are band-inflated** (`h × w × num_of_bands`). Don't
-   reason about them as ground-pixel counts. The LLD calls this out as a known mistake.
-7. **The SQL cloud threshold is `< 5`; the LLD says 10; Earth Engine downloaded at `<= 10`.** Decide
-   which you mean before re-running any filter.
-8. **`infer.py` plots `sqrt(sum(prediction))`** and labels it "Estimated Surface Area (no units)".
-   That is not an area. Use `final_areas.py` for real numbers.
-8b. **`train.py --batch` defaults to 2; the paper used 32.** Don't reproduce training with the
-   defaults and expect the published Dice score.
-9. **Two dead Keras files** (`helpers/model.py`, `inference/model.py`) sit next to the live PyTorch
-   code and import TensorFlow. Don't extend them; don't install TF for them.
-10. **A stray `full_time_series_c02_t1_l2/G007026E45991N/`** sits *beside* `landsat/` instead of
-    inside it — an old Trient download that landed a level too high. Harmless but confusing.
-11. **`cnn.py` defines `conv_block` twice** (lines 7 and 207). Verified byte-identical, so the
-    shadowing is harmless — but if you edit one, edit both.
-12. **`SHUFFLE_DATASET = False`** in `train.py`. Unusual; be deliberate about it.
-13. **`.DS_Store` files are in S3**, some 660 KB, mixed in with the tifs. Always `--exclude` them.
-14. **Notebooks hardcode one person's home directory** and some point at an unmounted external SSD.
-15. **Region flags.** Forget `--region` and `aws s3` will fail confusingly on a cross-region bucket.
+1. **Inference failures are logged, not raised.** `glacierview areas` isolates
+   each glacier so one bad scene does not kill a run over hundreds. **Read the
+   summary it prints** and check the exit code — a run can complete having
+   failed on most glaciers.
+2. **`num_pixels` and `percentage_zero_pixels` are band-inflated**
+   (`height × width × num_of_bands`). "More than 50,000 pixels" is really
+   ~6,250 ground pixels for an 8-band image. The design doc calls this out as
+   a known mistake. Do not reason about them as ground-pixel counts.
+3. **The cloud-cover threshold disagrees across three sources** — 5 in the
+   SQL, 10 in the design doc and the Earth Engine filter, 20 in the paper's
+   Trient study. Decide which you mean before re-running any filter.
+4. **Images and masks pair on the GLIMS ID prefix, not on filename.** Images
+   are named per scene, masks per glacier. Assuming matching names finds
+   nothing — which is exactly what the old training script did.
+5. **Two training-tif vintages exist**, `(1,128,128,7)` and `(128,128,8)`. The
+   loader normalises both, but anything reading tifs directly should not
+   assume a shape.
+6. **Checkpoints are pickled modules.** Use `load_checkpoint`; renaming a
+   layer can break an old checkpoint.
+7. **Reproducing the paper needs the pre-refactor training script** — the
+   `zero_grad` and loss-recording fixes change training dynamics.
+8. **`torchmetrics` renames metrics between minor versions.** `Dice` vanished
+   in 1.9. Dice and Jaccard are local functions now; keep them that way.
+9. **A stray `full_time_series_c02_t1_l2/G007026E45991N/`** sits beside
+   `landsat/` rather than inside it — an old download one level too high.
+10. **Notebooks hardcode nothing now, but still share one namespace.** A
+    variable that looks unused in its cell may be read by a later one, which
+    is why several ruff rules are exempted for `*.ipynb`.
+11. **Region flags.** Buckets are split across `us-east-1` and `us-west-1`;
+    forget `--region` and `aws s3` fails confusingly.
+12. **`.DS_Store` files are in S3**, some 660 KB, mixed in with the tifs.
 
----
 
 ## Part 11 — Glossary
 
@@ -1274,13 +1196,13 @@ When sources disagree, this is the precedence order:
    paper. `.agents/` is the agent-facing source of truth; this document is the long-form narrative
    it points back to.
 4. **The code.** Authoritative on what *currently runs*, which in several places is not the intended
-   design — `infer.py`, `final_areas.py` and `train.py` are all stale on channel count.
+   design. Since the refactor the two agree on channel count, which was not true before.
 5. **`low_level_design.md`** — authoritative on *rationale* (why thresholds, what the tech debt is,
    what the risks were). Its *specifics* have drifted: Glue table names are mangled, the band order
    is listed NDSI-first when the code prepends NDWI last, and its cloud-cover threshold disagrees
    with the SQL.
 6. **`README.md`** — the oldest of these (Nov 2023). Its directory layout
-   (`src/segmentation/training/src`, `inference/src`) partly predates the current tree, and it
+   (the training output directory, `inference/src`) partly predates the current tree, and it
    describes the model as taking "128x128 pixels with 7 bands" — which is neither the 8-channel
    design nor the 10-channel model input. Treat as historical.
 

@@ -57,7 +57,7 @@ uv sync
 
 This creates a `.venv` from `pyproject.toml` and `uv.lock`, downloading the
 right Python (3.12) if you don't have it. Prefix commands with `uv run`, e.g.
-`uv run python final_areas.py`, or activate `.venv` directly.
+`uv run glacierview areas`, or activate `.venv` directly.
 
 ## Usage
 

@@ -21,7 +21,7 @@ Checked by diffing local inventories against the buckets.
   glaciers in `filtered_inference_data.csv`, and all 1,024 in `geog_area_rollup_250.csv`, exist in S3.
 - `model` — both inference scripts `torch.load("model")` relative to cwd, and no such file exists.
   Copy or symlink `src/segmentation/unet_summer_model_unfrozen_100` into place.
-- `src/segmentation/glacier_areas/` — `glacierview areas` writes `glacier_areas\\{glims_id}_areas.csv`
+- `glacier_areas/` under the output directory — `glacierview areas` writes `glacier_areas\\{glims_id}_areas.csv`
   into it but never creates it (and the path uses a Windows separator). Every iteration will throw
   into the bare `except`, so the per-glacier CSVs silently never appear while the aggregate ones do.
 - ~~Input-channel mismatch~~ — fixed. All entry points now derive their channel count from
