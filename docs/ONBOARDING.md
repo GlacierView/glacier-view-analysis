@@ -603,7 +603,7 @@ trusting or reproducing the weighting.
 | Path | Role |
 |---|---|
 | `low_level_design.md` | The LLD. Read for rationale; verify its specifics. |
-| `CLAUDE.md` | Terse reference for Claude Code. Same facts as this doc, less explanation. |
+| `AGENTS.md`, `.agents/` | Agent-facing guidance, split into rules (how to behave), context (what to know), skills (how to do a task) and references. `CLAUDE.md` is a symlink to `AGENTS.md`, so Claude Code and Codex read the same entrypoint. |
 | `figures/` | Diagrams and plots, including `data_collection_and_preprocessing.drawio` (editable pipeline diagram) and the UTM-overlap illustrations. **Look at these early** — they explain the pipeline faster than prose. |
 | `src/styles/ieee.mplstyle` | Shared matplotlib style for publication-ready plots. |
 | `figures/inventory-examples/` | Screenshots showing why the RGI and GlobGlacier outlines were excluded. |
@@ -1270,8 +1270,9 @@ When sources disagree, this is the precedence order:
 2. **The paper.** Authoritative on the *intended* design and on every published number: the 9
    channels, the training recipe, the results. Its figures are more current than its body text, and
    it carries two stale numbers of its own (noted in Part 1).
-3. **This document** and `CLAUDE.md` — written from reading the code, querying AWS, and reading the
-   paper, on 2026-09-19.
+3. **This document** and `.agents/` — written from reading the code, querying AWS, and reading the
+   paper. `.agents/` is the agent-facing source of truth; this document is the long-form narrative
+   it points back to.
 4. **The code.** Authoritative on what *currently runs*, which in several places is not the intended
    design — `infer.py`, `final_areas.py` and `train.py` are all stale on channel count.
 5. **`low_level_design.md`** — authoritative on *rationale* (why thresholds, what the tech debt is,
