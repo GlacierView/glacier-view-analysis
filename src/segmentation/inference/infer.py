@@ -1,282 +1,154 @@
-import sys
-import os
-from pathlib import Path
+"""Segment one glacier's Landsat time series and render a GIF plus an area plot.
+
+Usage (from the repo's src/segmentation directory, or anywhere — the import
+path is bootstrapped below):
+
+    python inference/infer.py --glimsid G007026E45991N
+
+For every glacier in the landing zone at once, use ../final_areas.py instead.
+Both share the preprocessing helpers and the model, so they should agree.
+"""
+
 import argparse
-import pandas as pd
-import numpy as np
-from helpers import read
-from helpers import preprocess
-from helpers import landsat_bands
-import matplotlib.pyplot as plt
-import rasterio
-from skimage.filters import gaussian
+import os
+import sys
 from datetime import datetime
-import cv2
+from pathlib import Path
+
 import imageio.v2 as imageio
+import matplotlib.pyplot as plt
 import torch
+import torchvision
+from skimage.filters import gaussian
+from torch.utils.data import DataLoader, TensorDataset
 
-# Processing arguments
-parser = argparse.ArgumentParser("glims_id_parsing")
-parser.add_argument("--glimsid", help="Enter GLIMS ID of glacier", type=str, default="G007026E45991N")
+# Make `helpers` and `inference` importable no matter which directory this is
+# launched from.
+SEGMENTATION_DIR = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(SEGMENTATION_DIR))
 
-args = parser.parse_args()
+from helpers.preprocess import (  # noqa: E402
+    add_spectral_indices, prepare_glacier_stack,
+)
+from inference.cnn import IN_CHANNELS, UNet, conv_block  # noqa: E402,F401
 
-# define inputs
-# glims_id = 'G006628E45300N'
-# glims_id = 'G006819E45785N' #lex blanche
-# glims_id = 'G007026E45991N'  # trient
-# glims_id = 'G086519E27919N'
-glims_id = args.glimsid
+# UNet and conv_block are imported into this module's globals on purpose: the
+# released checkpoints are pickled modules referencing `__main__.UNet` and
+# `__main__.conv_block`, so both names must resolve here for torch.load to work.
+
+#: Probability above which a pixel counts as glacier.
 PROB_THRESH = 0.5
-data_label = "full_time_series"
-ee_data_dir = Path(__file__).parent.parent.parent/"earth_engine"/"data"/"ee_landing_zone"/data_label
-dem_data_dir = Path(__file__).parent.parent.parent/"earth_engine"/"data"/"ee_landing_zone"/data_label
-landsat_dir = os.path.join(ee_data_dir, "landsat")
-dem_dir = os.path.join(dem_data_dir, "dems")
-
-glacier_dir = os.path.join(landsat_dir, glims_id)
-dem_path = os.path.join(dem_dir, f"{glims_id}_NASADEM.tif")
-common_bands = ['blue', 'green', 'red', 'nir', 'swir', 'thermal', 'swir_2']
-dim = (128, 128)
-# read and preprocess images
-
-images = read.get_rasters(glacier_dir)
-
-sample_image_key = list(images.keys())[0]
-# print(f"Before preprocessing single image shape: {images[sample_image_key].shape}")
-images = preprocess.get_common_bands(images, common_bands)
-images = preprocess.normalize_rasters(images)
-images = preprocess.resize_rasters(images, dim)
-# print(f"After preprocessing single image shape: {images[sample_image_key].shape}")
-# read and preprocess dems
-
-dem = read.get_dem(dem_path)
-
-dem_key = list(dem.keys())[0]
-# print(f"Before preprocessing single dem shape: {dem[dem_key].shape}")
-dem = preprocess.resize_rasters(dem, dim)
-dem = preprocess.normalize_rasters(dem)
-# print(f"After preprocessing single dem shape: {dem[dem_key].shape}")
-dem.keys()
-combined_images_and_dems = [np.concatenate((images[file_name], dem[dem_key]), axis=2) for file_name in
-                            sorted(images.keys())]
-# match images with labels
-X = np.stack(combined_images_and_dems)
-X_smoothed = gaussian(X, sigma=[20, 0, 0, 0], mode='reflect')
-image_file_names_ordered = sorted(images.keys())
-image_dates = [datetime.strptime(f.split("_")[1], '%Y-%m-%d') for f in image_file_names_ordered]
-
-import torch
-
-import torchvision.models as models
-import torch.nn as nn
-import torch
-from torch.nn.functional import interpolate
+#: A Landsat pixel is 30 m x 30 m = 900 m^2 = 0.0009 km^2.
+KM2_PER_PIXEL = 0.0009
+#: Std. dev. of the Gaussian filter applied along the *time* axis, in frames.
+TIME_SMOOTHING_SIGMA = 20
+#: Keep every Nth frame in the GIF; the full series is too long to animate.
+GIF_FRAME_STRIDE = 5
 
 
-class conv_block(nn.Module):
-    def __init__(self, in_c, out_c):
-        super().__init__()
-        self.conv1 = nn.Conv2d(in_c, out_c, kernel_size=3, padding=1)
-        self.bn1 = nn.BatchNorm2d(out_c)
-        self.conv2 = nn.Conv2d(out_c, out_c, kernel_size=3, padding=1)
-        self.bn2 = nn.BatchNorm2d(out_c)
-        self.relu = nn.ReLU()
-
-    def forward(self, inputs):
-        x = self.conv1(inputs)
-        x = self.bn1(x)
-        x = self.relu(x)
-        x = self.conv2(x)
-        x = self.bn2(x)
-        x = self.relu(x)
-        return x
-
-class UNet(nn.Module):
-    def __init__(self, n_class, freeze_encoder=True):
-
-        # Number of Classes
-        self.n_class = n_class
-        # Should pre-trained encoder weights be trained or not
-        self.freeze_encoder = freeze_encoder
-        super(UNet, self).__init__()
-
-        # Loading resnet-50 pre-trained model
-        resnet = models.resnet50(weights='ResNet50_Weights.DEFAULT')
-
-        # Freeze encoder weights if set to True
-        if self.freeze_encoder:
-            for i, param in enumerate(resnet.parameters()):
-                if i == 0:
-                    pass
-                else:
-                    param.requires_grad = False
-        modules = list(resnet.children())[:-2]
-        self.resnet = nn.Sequential(*modules)
-
-        # Replacing encoder's first layer to allow 10 channels input intead of just 3
-        self.resnet[0] = nn.Conv2d(10, 64, kernel_size=7, stride=2, padding=3, bias=False)
-
-        self.relu = nn.ReLU(inplace=True)
-
-        # Defining decoder layer layers
-        self.deconv1 = nn.ConvTranspose2d(2048, 1024, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
-        self.bn1 = nn.BatchNorm2d(1024)
-        self.c1 = conv_block(2048, 1024).to(device)
-
-        self.deconv2 = nn.ConvTranspose2d(1024, 512, kernel_size=3, stride=2, padding=1, dilation=1,
-                                          output_padding=1)
-        self.bn2 = nn.BatchNorm2d(512)
-        self.c2 = conv_block(1024, 512).to(device)
-
-        self.deconv3 = nn.ConvTranspose2d(512, 256, kernel_size=3, stride=2, padding=1, dilation=1,
-                                          output_padding=1)
-        self.bn3 = nn.BatchNorm2d(256)
-        self.c3 = conv_block(512, 256).to(device)
-
-        self.deconv4 = nn.ConvTranspose2d(256, 64, kernel_size=3, stride=2, padding=1, dilation=1,
-                                          output_padding=1)
-        self.bn4 = nn.BatchNorm2d(64)
-        self.c4 = conv_block(128, 64).to(device)
-
-        self.deconv5 = nn.ConvTranspose2d(64, 32, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
-        self.bn5 = nn.BatchNorm2d(32)
-        self.c5 = conv_block(42, 16).to(device)
-        self.deconv6 = nn.ConvTranspose2d(32, 16, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
-        self.bn6 = nn.BatchNorm2d(16)
-        self.deconv7 = nn.ConvTranspose2d(16, 16, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
-        self.bn7 = nn.BatchNorm2d(16)
-        self.deconv8 = nn.ConvTranspose2d(16, 4, kernel_size=3, stride=2, padding=1, dilation=1, output_padding=1)
-        self.bn8 = nn.BatchNorm2d(4)
-        self.c8 = nn.Conv2d(4, 4, 6, stride=8, padding=0)
-        self.dropout = nn.Dropout(p=0.2)
-        self.classifier = nn.Conv2d(16, self.n_class, kernel_size=1)
-        self.softmax = torch.nn.Softmax(dim=1)
-
-    def forward(self, images):
-        x0 = self.resnet[0](images)
-        x1 = self.resnet[1](x0)
-        x2 = self.resnet[2](x1)
-        x3 = self.resnet[3](x2)
-        x4 = self.resnet[4](x3)
-        x5 = self.resnet[5](x4)
-        x6 = self.resnet[6](x5)
-        out = self.resnet[7](x6)
-
-        y1 = self.bn1(self.relu(self.deconv1(out)))
-        y1 = torch.cat([y1, x6], dim=1)
-        y1 = self.c1(y1)
-
-        y2 = self.bn2(self.relu(self.deconv2(y1)))
-        y2 = torch.cat([y2, x5], dim=1)
-        y2 = self.c2(y2)
-
-        y3 = self.bn3(self.relu(self.deconv3(y2)))
-        y3 = torch.cat([y3, x4], dim=1)
-        y3 = self.c3(y3)
-
-        y4 = self.bn4(self.relu(self.deconv4(y3)))
-        y4 = torch.cat([y4, x2], dim=1)
-        y4 = self.c4(y4)
-
-        y5 = self.bn5(self.relu(self.deconv5(y4)))
-        y5 = torch.cat([y5, images], dim=1)
-        y5 = self.c5(y5)
-
-        score = self.classifier(y5)
-
-        return score
+def parse_args():
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--glimsid", type=str, default="G007026E45991N",
+                        help="GLIMS ID of the glacier to segment.")
+    parser.add_argument("--data-label", type=str, default="full_time_series_c02_t1_l2",
+                        help="Landing-zone subdirectory holding the imagery.")
+    parser.add_argument("--model", type=str, default="model",
+                        help="Path to the checkpoint (a torch.save'd module).")
+    return parser.parse_args()
 
 
 
-torch_model = torch.load('model').eval()
-device = 'cuda' if torch.cuda.is_available() else 'cpu'
-device = torch.device(device)
-# apply the saved model
-# saved_models_dir = os.path.join(os.path.expanduser("~"),"PycharmProjects","glacier-view-analysis",  "src","segmentation","saved_models")
-# saved_model_path = os.path.join(saved_models_dir, "re_ni_sw_de_v1.h5")
 
-# model = keras.models.load_model(saved_model_path, compile = False)
-# predictions = model.predict(X_smoothed)
-inputs = torch.tensor(X_smoothed)
-from torch.utils.data import TensorDataset, DataLoader
 
-inputs = torch.tensor(X_smoothed)
 
-inputs = inputs.permute(0, 3, 1, 2)
-SMOOTH_FACTOR = 0.0001
+def predict(model, inputs, device):
+    """Return per-pixel glacier probabilities, zeroed below PROB_THRESH."""
+    threshold = torch.nn.Threshold(PROB_THRESH, 0)
+    batches = DataLoader(TensorDataset(inputs), batch_size=64)
 
-green = inputs[:, 1, :, :]
-swir = inputs[:, 4, :, :]
-nir = inputs[:, 3, :, :]
-
-ndsi = (green - swir + SMOOTH_FACTOR) / (green + swir + SMOOTH_FACTOR)
-ndsi = ndsi.unsqueeze(dim=1)
-inputs = torch.cat((ndsi, inputs), dim=1)
-
-ndwi = (green - nir + SMOOTH_FACTOR) / (green + nir + SMOOTH_FACTOR)
-ndwi = ndwi.unsqueeze(dim=1)
-inputs = torch.cat((ndwi, inputs), dim=1)
-
-inputs.shape
-prediction_dataset = TensorDataset(inputs)  # create your datset
-prediction_dataloader = DataLoader(prediction_dataset, batch_size=64)  # create your dataloader
-predictions = []
-for i in prediction_dataloader:
+    predictions = []
     with torch.no_grad():
-        outputs = torch_model.forward(i[0].to(device))
-        outputs = torch.softmax(outputs, dim=1)
-        outputs = outputs[:, 1, :, :].unsqueeze(1)
-    m = torch.nn.Threshold(PROB_THRESH, 0)
-    predictions.append(m(outputs))
+        for (batch,) in batches:
+            logits = model(batch.to(device=device, dtype=torch.float))
+            glacier_prob = torch.softmax(logits, dim=1)[:, 1].unsqueeze(1)
+            predictions.append(threshold(glacier_prob).cpu())
+    return torch.cat(predictions, dim=0).numpy()
 
-predictions = torch.cat(predictions, dim=0)
-predictions = predictions.detach().cpu().numpy()
-# create GIF
-# gif_creation_dir = os.path.join(os.path.expanduser("~"), "PycharmProjects", "glacier-view-analysis", "src",
-#                                 "segmentation", "tmp", "gif_creation")
-# gif_output_dir = os.path.join(os.path.expanduser("~"), "PycharmProjects", "glacier-view-analysis", "src",
-#                               "segmentation", "gifs")
-gif_creation_dir = Path(__file__).parent.parent.parent/ "segmentation"/"tmp"/"gif_creation"
-gif_output_dir = Path(__file__).parent.parent.parent/ "segmentation"/"gifs"
 
-if not os.path.exists(gif_creation_dir):
-    os.makedirs(gif_creation_dir)
+def measure_areas(predictions, original_sizes):
+    """Convert predicted masks to km^2 at each image's native resolution."""
+    areas = []
+    for prediction, size in zip(predictions, original_sizes):
+        mask = torch.from_numpy(prediction)
+        resized = torchvision.transforms.Resize(size, antialias=True)(mask)
+        binary = (resized > PROB_THRESH).sum().item()
+        areas.append(binary * KM2_PER_PIXEL)
+    return areas
 
-if not os.path.exists(gif_output_dir):
-    os.makedirs(gif_output_dir)
 
-for f in os.listdir(gif_creation_dir):
-    os.remove(os.path.join(gif_creation_dir, f))
+def write_gif(gif_path, scratch_dir, images, predictions, file_names):
+    """Render every GIF_FRAME_STRIDE'th frame, then animate them in order."""
+    os.makedirs(scratch_dir, exist_ok=True)
+    for stale in os.listdir(scratch_dir):
+        os.remove(os.path.join(scratch_dir, stale))
 
-for i in range(X_smoothed.shape[0]):
-    if i % 5 == 0:  # ignores 80% of images to run faster
-        fig, axs = plt.subplots(2, figsize=(
-        10, 10))  ##update the number of suplots to equal the number of layers you want to display
-        fig.suptitle(image_file_names_ordered[i])
-        axs[0].imshow((X_smoothed[i, :, :, :][:, :, [2, 1, 0]]))
-        # axs[0].imshow((X_smoothed[i,:,:,:][:,:,[5]]))
-        axs[1].imshow(predictions[i, 0, :, :])  #
+    for i in range(0, len(file_names), GIF_FRAME_STRIDE):
+        fig, axs = plt.subplots(2, figsize=(10, 10))
+        fig.suptitle(file_names[i])
+        axs[0].imshow(images[i][:, :, [2, 1, 0]])   # red, green, blue
+        axs[1].imshow(predictions[i, 0])
+        fig.savefig(os.path.join(scratch_dir, f"{file_names[i]}.png"), dpi=100)
+        plt.close(fig)
 
-        plt.savefig(os.path.join(gif_creation_dir, f'{image_file_names_ordered[i]}.png'), dpi=100)
-        # plt.show()
+    os.makedirs(os.path.dirname(gif_path), exist_ok=True)
+    with imageio.get_writer(gif_path, mode='I') as writer:
+        for frame in sorted(os.listdir(scratch_dir)):
+            writer.append_data(imageio.imread(os.path.join(scratch_dir, frame)))
 
-with imageio.get_writer(os.path.join(gif_output_dir, f"{glims_id}.gif"), mode='I') as writer:
-    for filename in sorted(os.listdir(gif_creation_dir)):
-        image = imageio.imread(os.path.join(gif_creation_dir, filename))
-        writer.append_data(image)
 
-# generate and save surface area time_series
+def main():
+    args = parse_args()
+    device = torch.device('cuda' if torch.cuda.is_available() else 'cpu')
 
-# ts_output_dir = os.path.join(os.path.expanduser("~"), "PycharmProjects", "glacier-view-analysis", "src", "segmentation",
-                             # "surface_area_time_series")
-ts_output_dir = Path(__file__).parent.parent.parent/ "segmentation"/"gifs"
-total_areas = []
-plt.figure()
-for prediction in predictions:
-    total_areas.append(np.sqrt(np.sum(prediction)))
-plt.plot(image_dates, total_areas)
-plt.title("Estimated Surface Area (no units)")
-plt.savefig(os.path.join(ts_output_dir, f"{glims_id}.png"))
+    landing_zone = SEGMENTATION_DIR.parent / "earth_engine" / "data" / "ee_landing_zone" / args.data_label
+    glacier_dir = landing_zone / "landsat" / args.glimsid
+    dem_path = landing_zone / "dems" / f"{args.glimsid}_NASADEM.tif"
 
-# plt.show()
+    stack, file_names, original_sizes = prepare_glacier_stack(
+        str(glacier_dir), str(dem_path)
+    )
+    dates = [datetime.strptime(f.split("_")[1], '%Y-%m-%d') for f in file_names]
+
+    # Smooth along the time axis only, so each pixel is averaged against
+    # itself on neighbouring dates. This runs before the indices are derived.
+    smoothed = gaussian(stack, sigma=[TIME_SMOOTHING_SIGMA, 0, 0, 0], mode='reflect')
+
+    inputs = torch.tensor(smoothed).permute(0, 3, 1, 2)
+    inputs = add_spectral_indices(inputs)
+    assert inputs.shape[1] == IN_CHANNELS, (
+        f"built {inputs.shape[1]} channels, model expects {IN_CHANNELS}"
+    )
+
+    model = torch.load(args.model, map_location=device).eval()
+    predictions = predict(model, inputs, device)
+
+    out_dir = SEGMENTATION_DIR / "gifs"
+    write_gif(
+        gif_path=str(out_dir / f"{args.glimsid}.gif"),
+        scratch_dir=str(SEGMENTATION_DIR / "tmp" / "gif_creation"),
+        images=smoothed,
+        predictions=predictions,
+        file_names=file_names,
+    )
+
+    areas = measure_areas(predictions, original_sizes)
+    plt.figure()
+    plt.plot(dates, areas)
+    plt.title(f"{args.glimsid} estimated surface area")
+    plt.ylabel("km$^2$")
+    plt.savefig(str(out_dir / f"{args.glimsid}.png"))
+    print(f"{len(file_names)} images; area {areas[0]:.2f} -> {areas[-1]:.2f} km^2")
+
+
+if __name__ == "__main__":
+    main()
