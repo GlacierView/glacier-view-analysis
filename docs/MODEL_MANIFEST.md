@@ -87,10 +87,51 @@ The Keras code that built these (`helpers/model.py`, `inference/model.py`) is de
 
 Full hashes: run `shasum -a 256 saved_models/*.h5`.
 
-## Unknowns
+## Measured scores
 
-1. Which PyTorch checkpoint produced the paper's 0.92 Dice.
-2. What changed between the 2023-12-27 and 2024-10-02 checkpoints.
-3. Neither has recorded per-region metrics, training duration, or the exact training-set snapshot.
+Both checkpoints scored on the same 359-image slice (`build_manifest` with
+`seed=0`, the second half of the 10% holdout), threshold 0.5:
+
+| Checkpoint | Dice | Jaccard |
+|---|---|---|
+| `unet_summer_model_unfrozen_100` | **0.8681** | 0.7679 |
+| `unet_2023-12-27` | 0.8261 | 0.7055 |
+
+`unet_summer_model_unfrozen_100` is the published model — confirmed by the
+project lead and consistent with these scores and with its filename, which
+encodes the recipe (summer images, unfrozen encoder, 100 epochs).
+
+⚠️ **Neither reaches the paper's reported 0.92, and batching does not explain
+it.** Averaging Dice different ways over the same predictions:
+
+| Averaging | Dice |
+|---|---|
+| per image | 0.8612 |
+| batches of 8 | 0.8681 |
+| batches of 32 (the paper's batch size) | 0.8713 |
+| pooled over all pixels | 0.8692 |
+
+All land at 0.86–0.87, so the ~0.05 gap is real rather than a measurement
+convention. Note the gap should if anything be *smaller* than reported here:
+these 359 images were almost certainly in the checkpoint's training data,
+since the original script shuffled unseeded with no persistent split, so this
+slice has no relationship to whatever it held out. That biases the score up.
+
+Three candidate explanations, not distinguished:
+
+1. The 0.92 was measured on a different test split, which was never recorded.
+   Dice varies considerably with which glaciers land in the holdout.
+2. The 0.92 came from a third checkpoint that no longer exists.
+3. **The 0.92 is a different quantity.** The original script used
+   `torchmetrics.Dice(average='micro')` on class indices, which counts
+   background agreement as well as ice overlap and scores much higher than the
+   mask-overlap Dice computed here. This is the leading suspicion, and it
+   would mean the published figure is not comparable to what the current code
+   reports.
+
+## Remaining unknowns
+
+1. What changed between the 2023-12-27 and 2024-10-02 checkpoints.
+2. Neither has recorded per-region metrics, training duration, or the exact training-set snapshot.
 
 Ask Somansh Budhwar or Armin Schwartzman (armins@ucsd.edu).

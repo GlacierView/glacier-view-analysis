@@ -892,8 +892,13 @@ Consequences that remain:
 | `unet_summer_model_unfrozen_100` | 2024-10-02 | 343,522,287 B | 9 |
 | `saved_models/model` | 2023-12-27 | 343,487,293 B | 9 |
 
-Different weights, ~10 months apart, and nothing records which produced the
-paper's 0.92 Dice. Both plus 18 legacy Keras `.h5` files are backed up to
+`unet_summer_model_unfrozen_100` is the published model: on the same
+359-image slice it scores **Dice 0.8681** against the other's 0.8261. Neither
+reaches the paper's 0.92, and batching does not explain the gap — see
+`docs/MODEL_MANIFEST.md`, which records the three candidate explanations. The
+most likely is that the published figure is a different metric
+(`torchmetrics.Dice(average='micro')` over class indices, which counts
+background agreement). Both plus 18 legacy Keras `.h5` files are backed up to
 `s3://segmentation-model-gv/checkpoints/` with a `MANIFEST.md`. Bucket
 versioning there is still off, so an overwrite is unrecoverable.
 
@@ -971,7 +976,9 @@ filtered set, not the bucket's 486 GB. See Part 9.
 
 1. **The 250-per-region selection query** was never committed, though its
    imagery and Athena tables exist.
-2. **Which checkpoint produced the 0.92 Dice** is unrecorded.
+2. **The paper's 0.92 Dice does not reproduce.** The published checkpoint
+   scores 0.868 on a held-out slice, and batching is ruled out as the cause.
+   Most likely a different metric definition; see `docs/MODEL_MANIFEST.md`.
 4. **Is the GLAMOS comparison still current?** A 14% underestimate on Trient
    in 2006 belongs in the paper's limitations if it holds.
 5. **Is there any backup of `glims_db_20210914/`,** the dated GLIMS snapshot
@@ -1234,9 +1241,9 @@ When sources disagree, this is the precedence order:
 1. **Does the 250-glacier selection SQL exist anywhere?** The committed file was a 0-byte
    placeholder, yet 1,101 glaciers were downloaded and the `_250` Athena tables are populated. The
    query that chose them is unrecorded.
-2. **What distinguishes the two PyTorch checkpoints?** `saved_models/model` (Dec 2023) vs
-   `unet_summer_model_unfrozen_100` (Oct 2024). Same architecture, different weights, no record of
-   which produced the paper's 0.92 Dice.
+2. **Why does the paper's 0.92 Dice not reproduce?** The published checkpoint
+   (`unet_summer_model_unfrozen_100`, confirmed) scores 0.868 on a held-out slice, with batching
+   ruled out. Most likely a different metric definition — see `docs/MODEL_MANIFEST.md`.
 3. **Is the GLAMOS comparison still current?** A commented-out passage notes Trient measured
    5.76 km² in 2006 against the model's 4.95 km² — a 14% underestimate. If that holds, it belongs in
    the paper's limitations.
