@@ -30,3 +30,7 @@ src/earth_engine/src/data/
 src/segmentation/inference/helpers/__pycache__/
 
 
+
+# Trained model checkpoints — too large for GitHub (100MB limit).
+# Backed up to s3://segmentation-model-gv/checkpoints/ ; see src/segmentation/MODEL_MANIFEST.md
+src/segmentation/unet_summer_model_unfrozen_100

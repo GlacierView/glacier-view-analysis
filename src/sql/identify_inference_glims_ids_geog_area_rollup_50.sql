@@ -53,7 +53,7 @@ from (
             and num_pixels > 50000
             and no_data_pixel_count = 0
             and percentage_zero_pixels < 0.1 
-            and geog_area != 'Canada' -- this will perfectly exclude glaciers on ellesmere island which is too far north for DEMs
+            and geog_area != 'Canada' -- this will perfectly exclude glaciers on Ellesmere Island which is too far north for DEMs
     )
     where
         rank_score = 1
