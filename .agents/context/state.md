@@ -5,7 +5,7 @@ Checked by diffing local inventories against the buckets.
 **Present and complete:**
 
 - Ready-to-train data — `training/data/processed_training_data_summer_months/` holds 7,174 images +
-  8,902 masks, an exact mirror of `training-images-t1-l2-sr`. `train.py` wants it at
+  8,902 masks, an exact mirror of `training-images-t1-l2-sr`. `glacierview train` wants it at
   `training_data/{images,masks}` relative to its cwd, so symlink rather than re-download.
 - Raw training data — 18,093 glacier dirs of imagery and DEMs under
   `localized_time_series_for_training_c02_t1_l2/`, plus `masks_staging_2/`. That is 148 glaciers *more*
@@ -21,14 +21,14 @@ Checked by diffing local inventories against the buckets.
   glaciers in `filtered_inference_data.csv`, and all 1,024 in `geog_area_rollup_250.csv`, exist in S3.
 - `model` — both inference scripts `torch.load("model")` relative to cwd, and no such file exists.
   Copy or symlink `src/segmentation/unet_summer_model_unfrozen_100` into place.
-- `src/segmentation/glacier_areas/` — `final_areas.py` writes `glacier_areas\\{glims_id}_areas.csv`
+- `src/segmentation/glacier_areas/` — `glacierview areas` writes `glacier_areas\\{glims_id}_areas.csv`
   into it but never creates it (and the path uses a Windows separator). Every iteration will throw
   into the bare `except`, so the per-glacier CSVs silently never appear while the aggregate ones do.
 - ~~Input-channel mismatch~~ — fixed. All entry points now derive their channel count from
-  `IN_CHANNELS` in `inference/cnn.py` and assert it before the first convolution.
+  `IN_CHANNELS` in `glacierview.models.unet` and assert it before the first convolution.
 
 **Missing, regenerable:** `areas_no_threshold.csv`, `areas_05_thresh.csv`, `areas_binary_05.csv` are
-outputs `final_areas.py` creates on startup.
+outputs `glacierview areas` creates on startup.
 
 **Recovered (2026-09-19).** The four analysis inputs `areas_true_vs_predicted_final.ipynb`
 live in **`data/analysis/`**, committed (the blanket `*.csv` ignore has a negation for that
@@ -40,7 +40,7 @@ so it no longer depends on where Jupyter was launched:
 | `geo_areas.csv` | 18,093 × 32 | the `glims_18k` table itself — `glac_id`, `db_area`, `geog_area`, **`geog_area_rollup`**, `bboxes`, elevations, `src_date`, submitters. Rollups: Asia 12,625 / N. America 3,704 / S. America 872 / Europe 602 / Caucausus 255 / **Oceania 35** |
 | `training_data_set.csv` | 10,447 × 12 | output of `training_data_query.sql` — one row per candidate training image with quality metadata + `rank_score`. This is the paper's stale "10,443". The empty-mask variance filter cuts it to the 7,174 actually trained on |
 | `training_areas.csv` | 3 × 260 | transposed lookup: ~259 glacier IDs → areas |
-| `areas_binary_05_filtered_smooth_25.csv` | 541 monthly dates × **245** glaciers | smoothed `final_areas.py` output, wide format (`pd.date_range('1979-01-01','2024-01-01',freq='MS')` = 541 months) |
+| `areas_binary_05_filtered_smooth_25.csv` | 541 monthly dates × **245** glaciers | smoothed `glacierview areas` output, wide format (`pd.date_range('1979-01-01','2024-01-01',freq='MS')` = 541 months) |
 
 ⚠️ **The areas CSV covers 245 glaciers; the paper claims 1,083.** So this is the 50-per-region
 vintage, not the run behind the paper's headline numbers — that output is still unaccounted for.

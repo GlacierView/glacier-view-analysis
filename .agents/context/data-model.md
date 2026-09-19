@@ -27,10 +27,10 @@ Bucket inventory and the Athena catalog: `.agents/references/aws.md`.
 
 ## Raster conventions
 
-`helpers/read.py` + `helpers/preprocess.py` are the shared raster path used by every notebook and script:
+`glacierview.rasters` + `glacierview.preprocess` are the shared raster path used by every notebook and script:
 
 - `read.get_rasters` returns a `{file_name: HWC array}` dict, clamping `-inf` and negatives to 0.
-- Band indices differ per satellite — `helpers/landsat_bands.py` maps names to indices for `l5`/`l7`/`l8`,
+- Band indices differ per satellite — `glacierview.bands` maps names to indices for `l5`/`l7`/`l8`,
   and `preprocess.get_common_bands` uses the **third underscore-delimited token of the filename**
   (`{glims_id}_{date}_{L5|L7|L8}_C02_T1_L2_SR.tif`) to pick the right map. Filenames are load-bearing;
   `infer.py` also parses the date from token 1.
@@ -49,7 +49,7 @@ Two steps the paper documents that are easy to miss in the code:
 
 ⚠️ The two inference scripts disagree on where smoothing happens, and the paper sides with
 `infer.py`: the paper smooths first and computes NDSI/NDWI on the smoothed stack (as `infer.py`
-does), while `final_areas.py` computes the indices first and then smooths everything including them.
+does), while `glacierview areas` computes the indices first and then smooths everything including them.
 
 ⚠️ Reprojection direction also differs: the paper says the *rasters* were reprojected to WGS 84 to
 match the polygons, while `mask_creator.ipynb` reprojects the *polygons* into each raster's UTM CRS.

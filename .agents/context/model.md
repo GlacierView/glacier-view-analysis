@@ -1,8 +1,8 @@
 # Model contract
 
 The published model is described in the project's IEEE paper
-(`.agents/references/paper.md`). It is defined **once**, in `src/segmentation/inference/cnn.py`;
-`infer.py`, `final_areas.py` and `training/src/train.py` all import `UNet` and `conv_block` from
+(`.agents/references/paper.md`). It is defined **once**, in `glacierview/models/unet.py`;
+`infer.py`, `glacierview areas` and `glacierview train` all import `UNet` and `conv_block` from
 there. It used to be copied into all three, which is how they drifted apart.
 
 ### The checkpoints take 9 input channels, not 10
@@ -22,11 +22,11 @@ glacier failed; that is fixed, and the count is now derived from one constant:
 
 | Source | Channels | |
 |---|---|---|
-| `helpers/preprocess.py` `COMMON_BANDS` | 6 bands + DEM = 7 → +NDSI +NDWI = **9** | matches |
+| `glacierview.preprocess` `COMMON_BANDS` | 6 bands + DEM = 7 → +NDSI +NDWI = **9** | matches |
 | training data on disk | 7-channel tifs (verified: `SamplesPerPixel: 7`) → **9** | matches |
-| `inference/cnn.py` `IN_CHANNELS` | **9** | the single declaration |
+| `glacierview.models.unet` `IN_CHANNELS` | **9** | the single declaration |
 
-`infer.py`, `final_areas.py` and `train.py` each assert their built tensor equals `IN_CHANNELS`
+`infer.py`, `glacierview areas` and `glacierview train` each assert their built tensor equals `IN_CHANNELS`
 before it reaches the first convolution, so a future mismatch fails loudly rather than inside a
 bare `except`.
 
@@ -35,7 +35,7 @@ bare `except`.
 `torch.save(model)` saved the whole live object from a script, so the pickle references
 `__main__.UNet` and `__main__.conv_block` (verified by reading the pickle's string table). To load a
 checkpoint, those two names must exist in the **`__main__`** namespace — which is why `infer.py`
-inlines a copy of the class, and why `final_areas.py`'s `from inference.cnn import UNet, conv_block`
+inlines a copy of the class, and why `glacierview areas`'s `from inference.cnn import UNet, conv_block`
 works only because it is itself `__main__` when run as a script. Loading from a notebook or library
 needs the same names injected first. Consequences:
 
@@ -69,7 +69,7 @@ and the training recipe. Bucket versioning there is still disabled, so an overwr
 
 ### Published training recipe (from the paper — differs from the script defaults)
 
-| | Paper | `train.py` default |
+| | Paper | `glacierview train` default |
 |---|---|---|
 | learning rate | 0.00001 | 0.00001 ✅ |
 | **batch size** | **32** | **2** ❌ |

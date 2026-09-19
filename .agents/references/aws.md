@@ -18,7 +18,7 @@ Verified against the project AWS account with the AWS CLI (`aws sts get-caller-i
 | `mwaismann-gv` | us-west-1 | a `test/` prefix, 2 objects | scratch, ignore |
 
 `training-images-t1-l2-sr` is the important one to know about: despite the name it is **not** raw
-imagery, it is the finished training set `train.py` consumes. `raw-training-images-t1-l2-sr` is the raw
+imagery, it is the finished training set `glacierview train` consumes. `raw-training-images-t1-l2-sr` is the raw
 Landsat that `mask_creator.ipynb` / `get_training_set.ipynb` turn into it.
 
 Buckets with a `-gv` suffix and 2021–2022 dates (`joined-time-series-gv`, `joined-dems-gv`,

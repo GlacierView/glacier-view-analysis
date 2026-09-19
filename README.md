@@ -61,47 +61,52 @@ right Python (3.12) if you don't have it. Prefix commands with `uv run`, e.g.
 
 ## Usage
 
-### Training
+Everything runs through one command; `--help` on any subcommand lists its flags.
 
-To use the glacier image segmentation model, follow these steps:
+```bash
+uv run glacierview config                     # print every resolved path
+uv run glacierview infer  --glims-id G007026E45991N --checkpoint <path>
+uv run glacierview areas  --checkpoint <path>
+uv run glacierview train  --epochs 10 --batch-size 32 --out-dir experiments/run1
+```
 
-1. Download the training data and create a training_data folder with sub-folders named images and masks.
+Try training without downloading anything — a 32-pair fixture is committed:
 
-2. Navigato to the training directory:
+```bash
+uv run glacierview train --data-dir data/sample/training --epochs 2 \
+  --batch-size 4 --out-dir /tmp/smoke --device cpu
+```
 
-   ```bash
-   cd src/segmentation/training/src
-   ```
+### Layout
 
-3. Train the model using the provided script:
+```
+src/glacierview/        the package: import it, or drive it from the CLI
+  config.py             paths and constants, overridable by env var
+  rasters.py            read GeoTIFFs and DEMs
+  preprocess.py         bands -> normalise -> resize -> indices
+  bands.py              per-satellite band maps
+  models/               the U-Net and checkpoint loading
+  earthengine/          Earth Engine export
+  inference/            predict, measure areas, render
+  training/             dataset, losses, training loop
+  cli.py                entry points
+notebooks/
+  pipeline/             numbered dataset-building steps
+  exploration/          sandboxes
+  analysis/             the published area analysis
+sql/                    Athena queries
+data/analysis/          committed reference CSVs
+data/sample/training/   a 32-pair training fixture
+docs/                   onboarding guide, design doc, model manifest
+.agents/                agent-facing rules, context, skills, references
+```
 
-    ```bash
-    python train.py
-    ```
-4.  Navigato to the inference directory:
+Paths come from `glacierview.config` and are environment-overridable, so the
+~110 GB of imagery does not have to live in the checkout:
 
-    ```bash
-    cd src/segmentation/inference/src
-    ```
-
-6. Perform inference on new glacier images:
-
-   ```bash
-    python predict.py
-    ```
-
-   Sample output is written to `src/segmentation/gifs/<GLIMS_ID>.gif` — the
-   predicted ice boundary animated across the glacier's time series.
-
-### Inference
-
-To infer the time-series data of a glacier and visualise its area, follow these steps:
-
-1. Download the landsat data folder and paste it in the directory src/earth_engine/
-2.  Run the following code with the desired glimsid
-   ```bash
-   python infer.py --glimsid G007026E45991N
-   ```
+```bash
+export GV_DATA_ROOT=/Volumes/T7/GlacierView
+```
 
 ## Model Architecture
 

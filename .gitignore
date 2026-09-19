@@ -45,6 +45,11 @@ src/segmentation/unet_summer_model_unfrozen_100
 # above exists to keep the multi-hundred-MB metadata dumps out; these four are
 # small, and areas_true_vs_predicted_final.ipynb needs them.
 !data/analysis/*.csv
+!data/glims_18k.parquet
+
+# A 32-pair training fixture, committed so `glacierview train` can be smoke
+# tested without the full 9.3 GB set.
+!data/sample/**
 
 # figures/ is curated project artwork — diagrams, the architecture figure, the
 # UTM illustrations, paper plots. The blanket *.png / *.jpg rules above target
