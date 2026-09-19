@@ -41,3 +41,16 @@ the real names are the clean ones above. The committed SQL joins unqualified tab
 against `glacier-view` in us-west-1. `inference_data_query.sql` targets the `_full_time_series` (50)
 vintage. **No committed query selects the 250-per-region set**, even though its imagery and Athena
 tables exist — an empty placeholder file was removed rather than left to look like a real query.
+
+## Athena query history
+
+`athena:ListQueryExecutions` and `athena:ListNamedQueries` are **denied** to the
+team IAM role, so past query text cannot be read via the API. Query *results*
+are readable, in the two output buckets under `Unsaved/<yyyy>/<mm>/<dd>/`, as a
+`<uuid>.csv` plus a `<uuid>.csv.metadata` that holds column types only — not
+the SQL.
+
+That is still enough to identify a run. The 250-per-region glacier selection
+was recovered this way: `Unsaved/2024/09/11/21704e69-…csv` is byte-identical to
+`geog_area_rollup_250.csv`, which pinned every parameter of the query now
+reconstructed in `sql/identify_inference_glims_ids_geog_area_rollup_250.sql`.

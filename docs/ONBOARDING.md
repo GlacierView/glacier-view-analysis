@@ -584,9 +584,19 @@ See `notebooks/README.md` for a per-notebook description. In short:
 | `identify_inference_glims_ids_geog_area_rollup_50.sql` | Top 50 glaciers per region by `db_area`. |
 | `denormalized_training_metadata.sql` | De-dupes `ee_metadata` by version, coalesces the two image-quality columns. |
 
-**The 250-per-region selection query does not exist.** Its imagery and Athena
-tables do. Adapt the `_50` query: `geog_size_rank <= 250`, pointed at the
-`_250` tables.
+`identify_inference_glims_ids_geog_area_rollup_250.sql` is a **reconstruction**,
+not the original. The original ran from the Athena console on 2024-09-11 and
+was never saved; the console history is not readable with the team IAM role.
+But the reconstruction is verified rather than guessed: the query's output
+survives as both an Athena result in
+`s3://glacier-view-athena-output-us-west-1/Unsaved/2024/09/11/` and as
+`geog_area_rollup_250.csv` in the repo — byte-identical — and that output pins
+every parameter. It differs from the `_50` query by one value,
+`geog_size_rank <= 250`. The file's header comment records the evidence.
+
+Note it reads the **training** metadata tables, not the `_250` ones: glacier
+selection happens before the inference imagery exists, so the `_250` tables are
+the *product* of downloading what this query chose.
 
 ### `data/`
 
@@ -974,9 +984,7 @@ filtered set, not the bucket's 486 GB. See Part 9.
 
 ### Still open
 
-1. **The 250-per-region selection query** was never committed, though its
-   imagery and Athena tables exist.
-2. **The paper's 0.92 Dice does not reproduce.** The published checkpoint
+1. **The paper's 0.92 Dice does not reproduce.** The published checkpoint
    scores 0.868 on a held-out slice, and batching is ruled out as the cause.
    Most likely a different metric definition; see `docs/MODEL_MANIFEST.md`.
 4. **Is the GLAMOS comparison still current?** A 14% underestimate on Trient
@@ -1235,13 +1243,13 @@ When sources disagree, this is the precedence order:
 - ~~Where did the 35 Oceania glaciers go?~~ They never entered inference: **zero** of them have a
   column in the areas file, and both analysis loops iterate `areas[:-1]`, which slices Oceania off
   the end of the region list.
+- ~~Does the 250-per-region selection SQL exist?~~ Not as text — the original ran from the console
+  and the history is not readable with the team role. **Reconstructed and verified** against the
+  byte-identical Athena result from 2024-09-11; it is the `_50` query with `geog_size_rank <= 250`.
 
 **Still open** — these need Somansh Budhwar or Armin Schwartzman (`armins@ucsd.edu`):
 
-1. **Does the 250-glacier selection SQL exist anywhere?** The committed file was a 0-byte
-   placeholder, yet 1,101 glaciers were downloaded and the `_250` Athena tables are populated. The
-   query that chose them is unrecorded.
-2. **Why does the paper's 0.92 Dice not reproduce?** The published checkpoint
+1. **Why does the paper's 0.92 Dice not reproduce?** The published checkpoint
    (`unet_summer_model_unfrozen_100`, confirmed) scores 0.868 on a held-out slice, with batching
    ruled out. Most likely a different metric definition — see `docs/MODEL_MANIFEST.md`.
 3. **Is the GLAMOS comparison still current?** A commented-out passage notes Trient measured
