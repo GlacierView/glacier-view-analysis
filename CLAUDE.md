@@ -44,7 +44,7 @@ The paper is a work in progress and carries `\editcom{}` notes; two of its own n
 `training_data_set.csv`, and its body text says 10 input channels where its channel figure says 9 —
 the figure is right, see "Model contract").
 
-`low_level_design.md` is the design doc — read it before changing anything in the data extraction,
+`docs/low_level_design.md` is the design doc — read it before changing anything in the data extraction,
 metadata, or pre-inference filtering steps, since it records *why* the filter thresholds are what they
 are and what the known tech debt is. Its concrete names (Glue tables, model band order) have drifted
 from the code; where they disagree, the "Data" and "Model contract" sections below were checked against
@@ -138,10 +138,11 @@ all external over the prefixes above:
 - inference, 50-per-rollup: `*_full_time_series`
 - inference, 250-per-rollup: `*_full_time_series_250`
 
-`low_level_design.md` lists mangled table names (`file_attributesee_metadata_full_time_series_250`) —
+`docs/low_level_design.md` lists mangled table names (`file_attributesee_metadata_full_time_series_250`) —
 the real names are the clean ones above. The committed SQL joins unqualified table names, so run it
 against `glacier-view` in us-west-1. `inference_data_query.sql` targets the `_full_time_series` (50)
-vintage; `identify_inference_data_glims_ids_geog_area_rollup_250.sql` is an empty 0-byte placeholder.
+vintage. **No committed query selects the 250-per-region set**, even though its imagery and Athena
+tables exist — an empty placeholder file was removed rather than left to look like a real query.
 
 ### What is present, and what is missing
 
@@ -222,7 +223,7 @@ aws s3 cp s3://full-time-series-images-t1-l2-sr/G007026E45991N/ \
   --recursive --region us-west-1 --exclude "*/meta_data/*" --exclude "*.DS_Store"
 ```
 
-`low_level_design.md` notes `sync` was too slow for the original upload; `cp --recursive` is what was
+`docs/low_level_design.md` notes `sync` was too slow for the original upload; `cp --recursive` is what was
 used. `.DS_Store` files were uploaded alongside the tifs (some are 660 KB) — exclude them, and exclude
 `meta_data/` unless re-running the metadata handler, since `read.get_rasters` only globs `.tif`.
 

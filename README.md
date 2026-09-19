@@ -12,6 +12,10 @@
 - [Contributing](#contributing)
 - [License](#license)
 
+> **New to this project?** Start with **[docs/ONBOARDING.md](docs/ONBOARDING.md)** — a guide written
+> for someone with no remote-sensing background. It covers the vocabulary, the pipeline end to end,
+> the AWS layout, and what is currently broken.
+
 ## Introduction
 ![CNN Architecture](figures/cnn_architecture.png)
 
@@ -86,9 +90,8 @@ To use the glacier image segmentation model, follow these steps:
     python predict.py
     ```
 
-   Sample output
-   
-   ![Glacier Image Segmentation](out.png)
+   Sample output is written to `src/segmentation/gifs/<GLIMS_ID>.gif` — the
+   predicted ice boundary animated across the glacier's time series.
 
 ### Inference
 

@@ -1,0 +1,27 @@
+# Normalise line endings. requirements.txt used to be UTF-16 with CRLF, which
+# is how it ended up uninstallable; this keeps text files consistent.
+* text=auto
+
+# Notebooks are JSON. Treating them as text gives readable (if noisy) diffs,
+# but they should not count toward the repo's language statistics — otherwise
+# GitHub reports this as a Jupyter Notebook project rather than a Python one.
+*.ipynb text linguist-language=Python linguist-detectable=false
+
+# Binary assets: never try to merge or diff these.
+*.png   binary
+*.jpg   binary
+*.gif   binary
+*.tif   binary
+*.qgz   binary
+*.parquet binary
+*.pgw   binary
+
+# Geospatial shapefile components are binary and travel as a set.
+*.shp binary
+*.shx binary
+*.dbf binary
+*.prj binary
+*.cpg binary
+
+# Committed reference data — diffing 18k rows is never useful.
+data/analysis/*.csv -diff

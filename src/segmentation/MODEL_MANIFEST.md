@@ -3,7 +3,7 @@
 Generated 2026-09-19. Records what each checkpoint is, because nothing else on disk does.
 
 **None of these files is in git** (`.gitignore` excludes `src/segmentation/saved_models/`)
-**and none is in S3.** They exist only on this machine. See `ONBOARDING.md` Part 8.
+**and none is in S3.** They exist only on this machine. See `docs/ONBOARDING.md` Part 8.
 
 ## PyTorch checkpoints
 

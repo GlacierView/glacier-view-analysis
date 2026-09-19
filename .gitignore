@@ -49,3 +49,4 @@ src/segmentation/unet_summer_model_unfrozen_100
 !figures/*.jpg
 !figures/*.drawio
 !figures/*.pgw
+!figures/inventory-examples/*.png

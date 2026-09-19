@@ -109,6 +109,12 @@ select = [
 #   TRY, BLE, LOG, ANN, D - style families this codebase has never followed;
 #          enabling them would bury the real findings.
 
+[tool.ruff.lint.isort]
+# These are local modules reached through a sys.path bootstrap rather than an
+# installed package, so state it explicitly — otherwise ruff's guess at
+# first-party vs third-party shifts with the directory layout.
+known-first-party = ["helpers", "inference"]
+
 [tool.ruff.lint.per-file-ignores]
 # Notebooks are exploratory and have their own idioms. These rules fire on
 # things that are normal in a notebook rather than on defects:

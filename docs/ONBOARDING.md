@@ -129,7 +129,7 @@ glacier has:
 
 **RGI** (Randolph Glacier Inventory) is a different inventory that got merged into GLIMS. It appears
 as a `geog_area` value and is deliberately excluded here, because its outlines are lower quality for
-this purpose. See `rgi_examples/` and `GlobGlacier examples/` for screenshots of why.
+this purpose. See `figures/inventory-examples/` for screenshots of why.
 
 ### Satellites and imagery
 
@@ -559,7 +559,7 @@ trusting or reproducing the weighting.
 | `training_data_query.sql` | **Live.** One representative summer image per glacier. |
 | `inference_data_query.sql` | **Live.** All qualifying summer images per glacier (`rank_score` commented out). Produced `filtered_inference_data.csv`. |
 | `identify_inference_glims_ids_geog_area_rollup_50.sql` | **Live.** Top 50 glaciers per region. |
-| `identify_inference_data_glims_ids_geog_area_rollup_250.sql` | **EMPTY — 0 bytes.** The 250-per-region expansion described in the LLD. The query was never committed. |
+| *(none)* | **The 250-per-region selection query does not exist.** An empty 0-byte placeholder for it was deleted, since it read as a real query. Adapt the `_50` query above: change `geog_size_rank <= 50` to `<= 250` and point it at the `_250` tables. |
 | `denormalized_training_metadata.sql` | Helper — de-dupes `ee_metadata` by version per file, coalesces `image_quality`/`image_quality_oli`. |
 
 ### `src/segmentation/` — the model and inference
@@ -606,8 +606,8 @@ trusting or reproducing the weighting.
 | `CLAUDE.md` | Terse reference for Claude Code. Same facts as this doc, less explanation. |
 | `figures/` | Diagrams and plots, including `data_collection_and_preprocessing.drawio` (editable pipeline diagram) and the UTM-overlap illustrations. **Look at these early** — they explain the pipeline faster than prose. |
 | `src/styles/ieee.mplstyle` | Shared matplotlib style for publication-ready plots. |
-| `rgi_examples/`, `GlobGlacier examples/` | Screenshots showing why those inventories were excluded. |
-| `QGIS projects/` | A QGIS project file — QGIS is the standard desktop GIS tool, useful for eyeballing a GeoTIFF against a basemap. |
+| `figures/inventory-examples/` | Screenshots showing why the RGI and GlobGlacier outlines were excluded. |
+| `qgis/` | A QGIS project file — QGIS is the standard desktop GIS tool, useful for eyeballing a GeoTIFF against a basemap. |
 | `figures/cnn_architecture.png` | The U-Net architecture diagram, shown in the README. |
 | `src/segmentation/gifs/` | Output GIFs from previous runs — ~150 of them. Watch a few; they make the whole project click. |
 
