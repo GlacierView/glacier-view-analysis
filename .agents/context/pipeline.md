@@ -15,7 +15,7 @@ Data flows in one direction; each stage writes files that the next stage reads.
    (database `glacier-view` in us-west-1 — see "Athena / Glue" below).
 4. **SQL filtering** — `sql/` queries run against Athena to pick which GLIMS IDs and which individual
    files are eligible. `identify_inference_*` picks glaciers (N per `geog_area_rollup`);
-   `inference_data_query.sql` / `training_data_query.sql` pick files. Criteria: cloud cover < 10%,
+   `inference_data_query.sql` / `training_data_query.sql` pick files. Criteria: cloud cover < 5%,
    summer months only (May–Oct northern hemisphere, Nov–Apr southern), > 50,000 pixels,
    0 no-data pixels, < 10% zero pixels.
 5. **Training-set build** — `mask_creator.ipynb` rasterizes GLIMS polygons into masks (reprojecting per

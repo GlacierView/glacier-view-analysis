@@ -969,21 +969,14 @@ filtered set, not the bucket's 486 GB. See Part 9.
 
 ### Still open
 
-1. **Where is the 1,083-glacier areas output?** The paper's −0.199%/yr comes
-   from 1,083 glaciers, but the recovered CSV covers 245. The artifact behind
-   the published numbers is unaccounted for. This is the first blocker for
-   reproducing the paper.
-2. **The 250-per-region selection query** was never committed, though its
+1. **The 250-per-region selection query** was never committed, though its
    imagery and Athena tables exist.
-3. **Cloud-cover threshold: 5, 10 or 20?** The SQL says `< 5`, the design doc
-   and the Earth Engine filter say 10, the paper's Trient case study says 20.
-4. **The regression weighting** may be inverted: the paper's formula computes
-   the proportion of data *missing* while the text claims it upweights
-   *complete* series. This affects every published regional average.
-5. **Which checkpoint produced the 0.92 Dice** is unrecorded.
-6. **35 Oceania glaciers** appear in `geo_areas.csv` and are treated as
-   southern-hemisphere by the SQL, but never appear among the paper's five
-   regions.
+2. **Which checkpoint produced the 0.92 Dice** is unrecorded.
+4. **Is the GLAMOS comparison still current?** A 14% underestimate on Trient
+   in 2006 belongs in the paper's limitations if it holds.
+5. **Is there any backup of `glims_db_20210914/`,** the dated GLIMS snapshot
+   the entire glacier selection derives from? It appears to exist on one
+   laptop only.
 
 ### Backed up, and not
 
@@ -1121,9 +1114,17 @@ Ordered by how likely they are to cost you a day.
    (`height × width × num_of_bands`). "More than 50,000 pixels" is really
    ~6,250 ground pixels for an 8-band image. The design doc calls this out as
    a known mistake. Do not reason about them as ground-pixel counts.
-3. **The cloud-cover threshold disagrees across three sources** — 5 in the
-   SQL, 10 in the design doc and the Earth Engine filter, 20 in the paper's
-   Trient study. Decide which you mean before re-running any filter.
+3. **Cloud cover is filtered twice, at different thresholds.** `<= 10`
+   server-side at download (`earthengine/export.py`), then **`< 5`** in the
+   pre-inference SQL. Verified against the data: both
+   `filtered_inference_data.csv` and `filtered_training_data_summer_months.csv`
+   top out at 4.99 and 4.34 with zero rows at or above 5, so `< 5` is what
+   produced the published results. The design doc's note about relaxing the
+   threshold to 10 only ever reached the download step. Consequence worth
+   knowing: **there is downloaded imagery between 5 and 10 cloud cover that
+   inference has never used.** Relaxing the SQL would add images with no new
+   download, but would diverge from the paper. The paper's Trient case study
+   used a looser `< 20` as a deliberate one-off.
 4. **Images and masks pair on the GLIMS ID prefix, not on filename.** Images
    are named per scene, masks per glacier. Assuming matching names finds
    nothing — which is exactly what the old training script did.
@@ -1199,8 +1200,8 @@ When sources disagree, this is the precedence order:
    design. Since the refactor the two agree on channel count, which was not true before.
 5. **`low_level_design.md`** — authoritative on *rationale* (why thresholds, what the tech debt is,
    what the risks were). Its *specifics* have drifted: Glue table names are mangled, the band order
-   is listed NDSI-first when the code prepends NDWI last, and its cloud-cover threshold disagrees
-   with the SQL.
+   is listed NDSI-first when the code prepends NDWI last, and its cloud-cover figure describes the
+   download filter rather than the stricter pre-inference one.
 6. **`README.md`** — the oldest of these (Nov 2023). Its directory layout
    (the training output directory, `inference/src`) partly predates the current tree, and it
    describes the model as taking "128x128 pixels with 7 bands" — which is neither the 8-channel
@@ -1212,26 +1213,30 @@ When sources disagree, this is the precedence order:
 
 - ~~Which channels was the model trained on?~~ **Nine**: NDWI, NDSI, blue, green, red, nir, swir,
   thermal, DEM. `swir_2` was dropped for quality. Confirmed directly against both checkpoints.
-- ~~Where are the four analysis CSVs?~~ Recovered 2026-09-19, now in the repo root.
+- ~~Where are the four analysis CSVs?~~ Recovered, now in `data/analysis/`.
+- ~~Where is the 1,083-glacier areas output?~~ **Recovered**:
+  `data/analysis/areas_binary_05_filtered_smooth_f.xlsx`, 1,085 glacier columns. Replicating the
+  notebook's annual-mean grouping and regressing per region gives exactly the paper's 1,083.
+- ~~Cloud-cover threshold: 5 or 10?~~ **Both, at different stages.** `<= 10` server-side at
+  download, `< 5` in the pre-inference SQL. Verified against the filtered file lists, which top out
+  at 4.99 and 4.34 with no rows at or above 5. The design doc's relaxation to 10 only reached the
+  download step.
+- ~~Is the regression weighting correct?~~ **No — it is inverted.** The code weights by
+  `(total_rows - n_observations) / total_rows`, the proportion of data *missing*. Corrected, the
+  overall rate moves from −0.06706 to −0.07557 and North America stops being an outlier. See
+  `.agents/context/state.md`.
+- ~~Where did the 35 Oceania glaciers go?~~ They never entered inference: **zero** of them have a
+  column in the areas file, and both analysis loops iterate `areas[:-1]`, which slices Oceania off
+  the end of the region list.
 
 **Still open** — these need Somansh Budhwar or Armin Schwartzman (`armins@ucsd.edu`):
 
-1. **Where is the 1,083-glacier areas output?** The paper's headline −0.199%/yr comes from 1,083
-   glaciers / 505,835 images, but the recovered `areas_binary_05_filtered_smooth_25.csv` covers only
-   245. The artifact behind the published numbers is missing.
-2. **Does the 250-glacier selection SQL exist anywhere?** The committed file is 0 bytes, yet 1,101
-   glaciers were downloaded and the `_250` Athena tables are populated. The query that chose them is
-   unrecorded.
-3. **Cloud-cover threshold: 5 or 10?** The committed SQL says `< 5`, the LLD and the Earth Engine
-   download filter say 10, and the paper's Trient case study says `< 20`. Three different numbers.
-4. **Is the observation weighting in the regression correct?** The paper's formula computes the
-   proportion of data *missing* while the text claims it upweights *complete* series. One of the two
-   is wrong, and it affects every published regional average.
-5. **What distinguishes the two PyTorch checkpoints?** `saved_models/model` (Dec 2023) vs
+1. **Does the 250-glacier selection SQL exist anywhere?** The committed file was a 0-byte
+   placeholder, yet 1,101 glaciers were downloaded and the `_250` Athena tables are populated. The
+   query that chose them is unrecorded.
+2. **What distinguishes the two PyTorch checkpoints?** `saved_models/model` (Dec 2023) vs
    `unet_summer_model_unfrozen_100` (Oct 2024). Same architecture, different weights, no record of
    which produced the paper's 0.92 Dice.
-6. **Where did the 35 Oceania glaciers go?** Present in `geo_areas.csv`, treated as southern
-   hemisphere by the SQL, absent from the paper's five regions.
-7. **Is the GLAMOS comparison still current?** A commented-out passage notes Trient measured
+3. **Is the GLAMOS comparison still current?** A commented-out passage notes Trient measured
    5.76 km² in 2006 against the model's 4.95 km² — a 14% underestimate. If that holds, it belongs in
    the paper's limitations.
